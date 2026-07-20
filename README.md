@@ -11,6 +11,38 @@ This system handles real-time computations, protected by reactive security, in-m
 * **Apache Maven** (or use the included `mvnw` wrapper scripts).
 * **PostgreSQL Server** running locally on port `5432` (via Docker or native Windows/macOS installer).
 
+<b>Boot the Microservice Cluster (Load Balancer Setup)</b>
+
+To simulate a horizontally scaled production environment, open three separate terminals inside the Web_Application_Spring directory and start three clones on different ports:
+
+<b>Terminal 1 (Port 8081):</b>
+
+```terminal
+mvnw clean spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+<b>Terminal 2 (Port 8082):</b>
+
+```terminal
+mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8082
+```
+
+<b>Terminal 3 (Port 8083):</b>
+
+```terminal
+mvnw spring-boot:run -Dspring-boot.run.arguments=--server.port=8083
+```
+
+Note: Watch the logs of Terminal 1 upon boot — you will see Hibernate execute create table vector_calculations automatically!
+
+<b>Step 3: Boot the API Gateway</b>
+
+Open a fourth terminal inside the api-gateway directory and launch the gateway:
+
+```terminal
+mvnw clean spring-boot:run
+```
+
 ---
 
 ## 🛠️ Technology Stack
