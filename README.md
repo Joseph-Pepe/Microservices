@@ -6,6 +6,23 @@ This system handles real-time computations, protected by reactive security, in-m
 
 ---
 
+## 🛠️ Technology Stack
+
+| Component | Technology | Description |
+| :--- | :--- | :--- |
+| **Runtime** | Java 21 LTS | JDK 21 |
+| **Framework** | Spring Boot 4.0.6 | Core Spring application engine |
+| **Gateway** | Spring Cloud Gateway | Reactive API Router & Load Balancer |
+| **Security** | Spring Security (WebFlux) | Reactive perimeter authentication |
+| **Database** | PostgreSQL 18.4 | Relational persistence engine |
+| **ORM** | Hibernate ORM 7.2.12 | Object-Relational Mapping & DDL generation |
+| **Resilience** | Resilience4j | Circuit breakers & fault tolerance |
+| **API Docs** | SpringDoc OpenAPI 3 / Swagger UI | Automated endpoint documentation |
+| **Container** | Docker | Multi-stage lightweight containerization |
+| **Cloud** | Google Cloud Platform (GCP) | Cloud Run (Serverless) + Cloud SQL (Postgres) |
+
+---
+
 ## ✨ Key Features
 
 ### 1. Reactive Perimeter Firewall (`api-gateway`)
