@@ -6,6 +6,39 @@ This system handles real-time computations, protected by reactive security, in-m
 
 ---
 
+## ✨ Key Features
+
+### 1. Reactive Perimeter Firewall (`api-gateway`)
+* Built on top of **Netty** and **Spring Security WebFlux**.
+* Intercepts all incoming traffic before routing, enforcing HTTP Basic Authentication (`admin` / `vector-secret-123`) via `SecurityConfig.java`.
+* Unauthenticated requests are immediately rejected with a clean `401 Unauthorized` without ever touching downstream services.
+
+### 2. Sliding-Window Rate Limiter (`LocalRateLimiterFilter.java`)
+* Features a thread-safe in-memory memory queue (`ConcurrentLinkedQueue`) that tracks user timestamps across a rolling **30-second window**.
+* Limits authenticated users to **10 requests per 30 seconds** to shield backend servers from DDoS attacks and API spam.
+* Throws reactive `ResponseStatusException` signals, returning standardized `429 Too Many Requests` JSON payloads with unique request tracking IDs.
+
+### 3. Client-Side Load Balancing (`spring-cloud-starter-loadbalancer`)
+* Configured with simple instance discovery (`lb://vector-service`) mapping traffic across multiple ports (`8081`, `8082`, `8083`).
+* Distributes compute load using a **Round-Robin** algorithm, ensuring uniform CPU utilization across all active microservice clones.
+
+### 4. Circuit Breaker & Fault Tolerance (`Resilience4j`)
+* Wraps critical math operations (like vector addition) with `@CircuitBreaker(name = "vectorMathService", fallbackMethod = "addVectorsFallback")`.
+* Automatically trips when backend error thresholds are exceeded, instantly rerouting traffic to a fallback method that returns a safe default (zero-vector `{x:0, y:0, z:0}`) to prevent catastrophic cascading system failures.
+
+### 5. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
+* Uses thin interfaces (`VectorCalculationRepository`) extending `JpaRepository` to eliminate boilerplate JDBC code.
+* Configured with `ddl-auto: update`, allowing Hibernate to dynamically inspect and generate PostgreSQL database tables (`vector_calculations`) at startup.
+* Implements ACID-compliant persistence, saving timestamped vector inputs and calculated magnitudes into a permanent ledger.
+
+### 6. Automated Reactive Integration Testing (`WebTestClient`)
+* Complete automated test suite (`GatewaySecurityAndRateLimitTests.java`) designed for WebFlux asynchronous pipelines.
+* Uses custom timeout mutations (`Duration.ofSeconds(10)`) to gracefully handle server cold-starts while mathematically verifying perimeter security drops and rate-limiter queue exhaustion.
+
+---
+
+---
+
 ## 🏛️ System Architecture
 
 The application follows a modern N-Tier distributed microservice architecture:
