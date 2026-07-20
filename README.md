@@ -97,7 +97,7 @@ mvnw clean spring-boot:run
 
 The application follows a modern N-Tier distributed microservice architecture:
 
-+-------------------------------------------------+
+              +-------------------------------------------------+
               |              External Web Clients               |
               |  (cURL, React / Angular Frontend, Mobile Apps)  |
               +-------------------------------------------------+
@@ -119,13 +119,13 @@ The application follows a modern N-Tier distributed microservice architecture:
                 |                      |                      |
                 v                      v                      v
     +----------------------+ +----------------------+ +----------------------+
-    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |                      ┌──────────────────────────────────────────────────┐
-    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |                      │        Microservice Clones (Spring JPA)          │
-    +----------------------+ +----------------------+ +----------------------+                      │  ├── Controller Layer (Thin HTTP Handlers)       │
-    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |                      |  ├── Service Layer (Math & Business Logic)       |
-    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |                      │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
-    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |                      │  └── Repository Layer (Hibernate ORM Bridge)     │
-    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |                      └──────────────────────┬───────────────────────────┘
+    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |         ┌──────────────────────────────────────────────────┐
+    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |         │        Microservice Clones (Spring JPA)          │
+    +----------------------+ +----------------------+ +----------------------+         │  ├── Controller Layer (Thin HTTP Handlers)       │
+    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |         |  ├── Service Layer (Math & Business Logic)       |
+    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |         │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
+    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |         │  └── Repository Layer (Hibernate ORM Bridge)     │
+    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |         └──────────────────────┬───────────────────────────┘
     +----------------------+ +----------------------+ +----------------------+
                 \                      |                      /
                  \                     |                     /
@@ -138,8 +138,6 @@ The application follows a modern N-Tier distributed microservice architecture:
               |  Schema: id, calculated_at, magnitude, x, y, z  |
               +-------------------------------------------------+
 
-
----
 
 📡 API Reference & cURL Verification
 
