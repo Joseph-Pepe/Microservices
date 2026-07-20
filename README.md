@@ -4,8 +4,6 @@ An enterprise-grade, horizontally scalable microservice architecture engineered 
 
 This system handles real-time computations, protected by reactive security, in-memory sliding-window rate limiting, and client-side load balancing. It is fully containerized and cloud-ready for **Google Cloud Platform (GCP)**.
 
----
-
 ## 🛠️ Technology Stack
 
 | Component | Technology | Description |
