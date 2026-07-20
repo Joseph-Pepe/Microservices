@@ -21,10 +21,10 @@ The application follows a modern N-Tier distributed microservice architecture:
 │  ├── Rate Limiter (10 Req / 30 Sec Sliding Win.) │
 │  └── Load Balancer (Round-Robin : lb://)         │
 └──────────────────────┬───────────────────────────┘
-│
-┌─────────────┼─────────────┐
-▼             ▼             ▼
-[Port 8081]   [Port 8082]   [Port 8083]
+                       │
+         ┌─────────────┼─────────────┐
+         ▼             ▼             ▼
+    [Port 8081]   [Port 8082]   [Port 8083]
 ┌──────────────────────────────────────────────────┐
 │      Microservice Clones (Spring JPA)     │
 │  ├── Controller Layer (Thin HTTP Handlers)       │
@@ -32,8 +32,9 @@ The application follows a modern N-Tier distributed microservice architecture:
 │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
 │  └── Repository Layer (Hibernate ORM Bridge)     │
 └──────────────────────┬───────────────────────────┘
-│
-▼  (JDBC / Port 5432)
+                       │
+                       ▼  
+               (JDBC / Port 5432)
 ┌──────────────────────────────────────────────────┐
 │            PostgreSQL 18 Database                │
 │  └── Table: vector_calculations (History Ledger) │
