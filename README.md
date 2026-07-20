@@ -12,7 +12,9 @@ The application follows a modern N-Tier distributed microservice architecture:
 
 [ Client / cURL ]
 │
-▼  (HTTP Basic Auth : Port 8080)
+▼  
+
+(HTTP Basic Auth : Port 8080)
 ┌──────────────────────────────────────────────────┐
 │              Spring Cloud Gateway                │
 │  ├── Security Firewall (Reactive Basic Auth)     │
