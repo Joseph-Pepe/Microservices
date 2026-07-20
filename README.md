@@ -65,13 +65,13 @@ The application follows a modern N-Tier distributed microservice architecture:
                 |                      |                      |
                 v                      v                      v
     +----------------------+ +----------------------+ +----------------------+
-    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |
-    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |
-    +----------------------+ +----------------------+ +----------------------+
-    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |
-    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |
-    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |
-    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |
+    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |                      ┌──────────────────────────────────────────────────┐
+    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |                      │        Microservice Clones (Spring JPA)          │
+    +----------------------+ +----------------------+ +----------------------+                      │  ├── Controller Layer (Thin HTTP Handlers)       │
+    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |                      |  ├── Service Layer (Math & Business Logic)       |
+    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |                      │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
+    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |                      │  └── Repository Layer (Hibernate ORM Bridge)     │
+    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |                      └──────────────────────┬───────────────────────────┘
     +----------------------+ +----------------------+ +----------------------+
                 \                      |                      /
                  \                     |                     /
@@ -83,35 +83,3 @@ The application follows a modern N-Tier distributed microservice architecture:
               |  Table: vector_calculations                     |
               |  Schema: id, calculated_at, magnitude, x, y, z  |
               +-------------------------------------------------+
-
-              
-
-[ Client / cURL ]
-│
-▼  
-
-(HTTP Basic Auth : Port 8080)
-┌──────────────────────────────────────────────────┐
-│              Spring Cloud Gateway                │
-│  ├── Security Firewall (Reactive Basic Auth)     │
-│  ├── Rate Limiter (10 Req / 30 Sec Sliding Win.) │
-│  └── Load Balancer (Round-Robin : lb://)         │
-└──────────────────────┬───────────────────────────┘
-                       │
-         ┌─────────────┼─────────────┐
-         ▼             ▼             ▼
-    [Port 8081]   [Port 8082]   [Port 8083]
-┌──────────────────────────────────────────────────┐
-│      Microservice Clones (Spring JPA)     │
-│  ├── Controller Layer (Thin HTTP Handlers)       │
-│  ├── Service Layer (Math & Business Logic)       │
-│  ├── Circuit Breaker (Resilience4j Fallbacks)    │
-│  └── Repository Layer (Hibernate ORM Bridge)     │
-└──────────────────────┬───────────────────────────┘
-                       │
-                       ▼  
-               (JDBC / Port 5432)
-┌──────────────────────────────────────────────────┐
-│            PostgreSQL 18 Database                │
-│  └── Table: vector_calculations (History Ledger) │
-└──────────────────────────────────────────────────┘
