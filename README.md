@@ -145,7 +145,7 @@ mvnw clean spring-boot:run
 
 All client interactions must be directed to the API Gateway on Port 8080. Direct access to backend ports (8081-8083) should be blocked in production environments.
 
-<b>1. Deploy API Gateway to Cloud Run</b>
+<b>1. Routing Verification</b>
 
 Tests the connection through the gateway to any available backend service.
 
@@ -197,7 +197,9 @@ Expected Response (200 OK):JSON
 }
 ```
 
-<b>4. Scale VectorMultiplies a 3D vector's coordinates by a scalar path variable.</b>
+<b>4. Scale Vector</b> 
+
+Multiplies a 3D vector's coordinates by a scalar path variable.
 
 ```
 curl -v -u admin:vector-secret-123 -X POST http://localhost:8080/api/vectors/scale/3 \
@@ -268,7 +270,9 @@ Test Cases Covered:
 1. testHackerAttempt_shouldReturn401Unauthorized: Proves that requests missing Basic Auth headers are blocked at the perimeter before routing.
 2. testSpammingServer_shouldTriggerRateLimiter429: Executes a rapid loop of 10 valid requests to fill the sliding window queue, then asserts that the 11th request is rejected with HTTP 429 Too Many Requests.
 
-☁️ Google Cloud Platform (GCP) DeploymentThe entire ecosystem is structured for serverless container deployment using Google Cloud Run and Google Cloud SQL.
+☁️ Google Cloud Platform (GCP) Deployment
+
+The entire ecosystem is structured for serverless container deployment using Google Cloud Run and Google Cloud SQL.
 
 Step 1: Build the Docker ContainersBoth services utilize lightweight Alpine Linux Java runtime containers. The included Dockerfile in each root directory:Dockerfile
 
@@ -301,7 +305,9 @@ gcloud run deploy vector-api \
   --set-env-vars SPRING_DATASOURCE_PASSWORD=your_cloud_password
 ```
 
-Step 3: Deploy API Gateway to Cloud RunOnce the vector-api deploys, take its generated cloud HTTPS URL (e.g., https://vector-api-xyz.a.run.app) and update your Gateway's routing configuration. Then deploy the gateway:
+Step 3: Deploy API Gateway to Cloud Run
+
+Once the vector-api deploys, take its generated cloud HTTPS URL (e.g., https://vector-api-xyz.a.run.app) and update your Gateway's routing configuration. Then deploy the gateway:
 
 ```
 cd api-gateway
