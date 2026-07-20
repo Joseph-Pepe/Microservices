@@ -4,6 +4,52 @@ An enterprise-grade, horizontally scalable microservice architecture engineered 
 
 This system handles real-time computations, protected by reactive security, in-memory sliding-window rate limiting, and client-side load balancing. It is fully containerized and cloud-ready for **Google Cloud Platform (GCP)**.
 
+## 🏛️ System Architecture
+
+The application follows a modern N-Tier distributed microservice architecture:
+
+              +-------------------------------------------------+
+              |              External Web Clients               |
+              |  (cURL, React / Angular Frontend, Mobile Apps)  |
+              +-------------------------------------------------+
+                                       |
+                                       | HTTP POST/GET (Basic Auth: admin / vector-secret-123)
+                                       v
+              +-------------------------------------------------+
+              |          Spring Cloud API Gateway               |
+              |                (Port 8080)                      |
+              +-------------------------------------------------+
+              |  1. Perimeter Firewall (Spring Security WebFlux)|
+              |  2. Sliding-Window Rate Limiter (10 req/30 sec) |
+              |  3. Client-Side Load Balancer (Round-Robin)     |
+              +-------------------------------------------------+
+                                       |
+                +----------------------+----------------------+
+                |                      |                      |
+         lb://vector-service    lb://vector-service    lb://vector-service
+                |                      |                      |
+                v                      v                      v
+    +----------------------+ +----------------------+ +----------------------+
+    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |         ┌──────────────────────────────────────────────────┐
+    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |         │           Microservice (Spring JPA)              │
+    +----------------------+ +----------------------+ +----------------------+         │  ├── Controller Layer (Thin HTTP Handlers)       │
+    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |         |  ├── Service Layer (Math & Business Logic)       |
+    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |         │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
+    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |         │  └── Repository Layer (Hibernate ORM Bridge)     │
+    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |         └──────────────────────┬───────────────────────────┘
+    +----------------------+ +----------------------+ +----------------------+
+                \                      |                      /
+                 \                     |                     /
+                  v                    v                    v
+              +-------------------------------------------------+
+              |             PostgreSQL Database                 |
+              |         (Port 5432 / GCP Cloud SQL)             |
+              +-------------------------------------------------+
+              |  Table: vector_calculations                     |
+              |  Schema: id, calculated_at, magnitude, x, y, z  |
+              +-------------------------------------------------+
+
+
 ## 🛠️ Technology Stack
 
 | Component | Technology | Description |
@@ -93,50 +139,6 @@ mvnw clean spring-boot:run
 
 ---
 
-## 🏛️ System Architecture
-
-The application follows a modern N-Tier distributed microservice architecture:
-
-              +-------------------------------------------------+
-              |              External Web Clients               |
-              |  (cURL, React / Angular Frontend, Mobile Apps)  |
-              +-------------------------------------------------+
-                                       |
-                                       | HTTP POST/GET (Basic Auth: admin / vector-secret-123)
-                                       v
-              +-------------------------------------------------+
-              |          Spring Cloud API Gateway               |
-              |                (Port 8080)                      |
-              +-------------------------------------------------+
-              |  1. Perimeter Firewall (Spring Security WebFlux)|
-              |  2. Sliding-Window Rate Limiter (10 req/30 sec) |
-              |  3. Client-Side Load Balancer (Round-Robin)     |
-              +-------------------------------------------------+
-                                       |
-                +----------------------+----------------------+
-                |                      |                      |
-         lb://vector-service    lb://vector-service    lb://vector-service
-                |                      |                      |
-                v                      v                      v
-    +----------------------+ +----------------------+ +----------------------+
-    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |         ┌──────────────────────────────────────────────────┐
-    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |         │           Microservice (Spring JPA)              │
-    +----------------------+ +----------------------+ +----------------------+         │  ├── Controller Layer (Thin HTTP Handlers)       │
-    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |         |  ├── Service Layer (Math & Business Logic)       |
-    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |         │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
-    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |         │  └── Repository Layer (Hibernate ORM Bridge)     │
-    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |         └──────────────────────┬───────────────────────────┘
-    +----------------------+ +----------------------+ +----------------------+
-                \                      |                      /
-                 \                     |                     /
-                  v                    v                    v
-              +-------------------------------------------------+
-              |             PostgreSQL Database                 |
-              |         (Port 5432 / GCP Cloud SQL)             |
-              +-------------------------------------------------+
-              |  Table: vector_calculations                     |
-              |  Schema: id, calculated_at, magnitude, x, y, z  |
-              +-------------------------------------------------+
 
 
 📡 API Reference & cURL Verification
