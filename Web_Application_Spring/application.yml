@@ -1,0 +1,24 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/vector_db
+    username: postgres
+    password: your_super_secret_password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update # This tells Hibernate to automatically create your database tables based on your Java code!
+    show-sql: true # Prints the SQL Hibernate generates to your terminal so you can see the magic
+    properties:
+      hibernate:
+        format_sql: true
+
+# Resilience4j MUST be at the root level (all the way to the left), not inside 'spring'
+resilience4j.circuitbreaker:
+  instances:
+    vectorMathService:               # CRITICAL FIX: This must match the exact 'name' in your @CircuitBreaker annotation!
+      slidingWindowSize: 10          # Check the last 10 requests
+      failureRateThreshold: 50       # Trip if 50% of them fail
+      waitDurationInOpenState: 5000ms # Stay OPEN for 5 seconds before trying again

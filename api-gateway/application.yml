@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  cloud:
+    # 1. Provide a list of the available Vector API clones
+    discovery:
+      client:
+        simple:
+          instances:
+            vector-service: # The name of our cluster
+              - uri: http://localhost:8081
+              - uri: http://localhost:8082
+              - uri: http://localhost:8083
+    gateway:
+      routes:
+        - id: vector_service_route
+          # 2. Tell the Gateway to use the Load Balancer (lb://) to find a server in the 'vector-service' cluster
+          uri: lb://vector-service 
+          predicates:
+            - Path=/api/vectors/**
