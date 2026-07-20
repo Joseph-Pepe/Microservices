@@ -73,8 +73,9 @@ public class Vector3DController {
        return vectorService.scaleVector(vector, factor);
     }
 
-    // 1. Calculate Magnitude & SAVE to the database
+    // Calculate Magnitude & SAVE to the database
     // curl -X POST http://localhost:8080/api/vectors/calculateMagnitude -H "Content-Type: application/json" -d "{\"x\": 1.0, \"y\": 2.0, \"z\": 3.0}"
+    // curl -u admin:vector-secret-123 -X POST http://localhost:8080/api/vectors/calculateMagnitude -H "Content-Type: application/json" -d "{\"x\": 3.0, \"y\": 4.0, \"z\": 0.0}"
     @PostMapping("/calculateMagnitude")
     public double calculateMagnitude(@io.swagger.v3.oas.annotations.parameters.RequestBody(
                                         description = "3D vector's magnitude",
@@ -83,9 +84,17 @@ public class Vector3DController {
         return vectorService.calculateMagnitude(vector);
     }
 
-    // 3. NEW ENDPOINT: Let the user view the database history!
+    // Let the user view the database history!
+    // curl -v -u admin:vector-secret-123 http://localhost:8080/api/vectors/history
     @GetMapping("/history")
     public List<VectorCalculation> getCalculationHistory() {
         return vectorService.getCalculationHistory();
+    }
+
+    // 4. Search history by ID
+    // curl -v -u admin:vector-secret-123 "http://localhost:8080/api/vectors/search?keyword=1"
+    @GetMapping("/search")
+    public List<VectorCalculation> searchHistoryById(@RequestParam("keyword") String keyword) {
+        return vectorService.searchHistoryById(keyword);
     }
 }

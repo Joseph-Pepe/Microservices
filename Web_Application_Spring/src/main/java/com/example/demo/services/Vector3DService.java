@@ -21,7 +21,7 @@ public class Vector3DService {
 
     private static final Logger log = LoggerFactory.getLogger(Vector3DService.class);
 
-    // 1 Inject the Database Bridge
+    // 1. Inject the Database Bridge
     private final VectorCalculationRepository repository;
 
     public Vector3DService(VectorCalculationRepository repository) {
@@ -66,9 +66,15 @@ public class Vector3DService {
         return magnitude;
     }
 
-    // 3. NEW ENDPOINT: Let the user view the database history!
+    // 3. Let the user view the database history!
     public List<VectorCalculation> getCalculationHistory() {
         // Automatically runs 'SELECT * FROM vector_calculations'
         return repository.findAll();
+    }
+
+    // 4. Search the database history by ID keyword
+    public List<VectorCalculation> searchHistoryById(String keyword) {
+        log.info("🔍 Searching database for ID keyword: {} on Port: {}", keyword, serverPort);
+        return repository.searchByIdKeyword(keyword);
     }
 }

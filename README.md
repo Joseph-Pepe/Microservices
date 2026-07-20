@@ -106,6 +106,13 @@ Open a fourth terminal inside the api-gateway directory and launch the gateway:
 mvnw clean spring-boot:run
 ```
 
+<b>Step 4: Verify the Database Connection</b>
+
+
+```terminal
+netstat -ano | findstr 5432
+```
+
 ---
 
 ## ✨ Key Features
