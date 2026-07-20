@@ -4,6 +4,13 @@ An enterprise-grade, horizontally scalable microservice architecture engineered 
 
 This system handles real-time computations, protected by reactive security, in-memory sliding-window rate limiting, and client-side load balancing. It is fully containerized and cloud-ready for **Google Cloud Platform (GCP)**.
 
+## 🚀 Local Development Setup
+
+### Prerequisites
+* **JDK 21+** installed and added to your system `PATH`.
+* **Apache Maven** (or use the included `mvnw` wrapper scripts).
+* **PostgreSQL Server** running locally on port `5432` (via Docker or native Windows/macOS installer).
+
 ---
 
 ## 🛠️ Technology Stack
