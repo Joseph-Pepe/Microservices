@@ -93,8 +93,6 @@ mvnw clean spring-boot:run
 
 ---
 
----
-
 ## 🏛️ System Architecture
 
 The application follows a modern N-Tier distributed microservice architecture:
