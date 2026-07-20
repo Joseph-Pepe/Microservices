@@ -219,7 +219,12 @@ Expected Response (200 OK):JSON
 
 <b>5. Retrieve Database Ledger History</b>
 
-Queries PostgreSQL via Spring Data JPA (SELECT * FROM vector_calculations) and returns the complete calculation ledger.Bashcurl -v -u admin:vector-secret-123 http://localhost:8080/api/vectors/history
+Queries PostgreSQL via Spring Data JPA (SELECT * FROM vector_calculations) and returns the complete calculation ledger.
+
+```
+curl -v -u admin:vector-secret-123 http://localhost:8080/api/vectors/history
+```
+
 Expected Response (200 OK):JSON
 
 ```
