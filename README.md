@@ -120,7 +120,7 @@ The application follows a modern N-Tier distributed microservice architecture:
                 v                      v                      v
     +----------------------+ +----------------------+ +----------------------+
     |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |         ┌──────────────────────────────────────────────────┐
-    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |         │        Microservice Clones (Spring JPA)          │
+    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |         │           Microservice (Spring JPA)              │
     +----------------------+ +----------------------+ +----------------------+         │  ├── Controller Layer (Thin HTTP Handlers)       │
     | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |         |  ├── Service Layer (Math & Business Logic)       |
     | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |         │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
