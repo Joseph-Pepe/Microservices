@@ -137,3 +137,144 @@ The application follows a modern N-Tier distributed microservice architecture:
               |  Table: vector_calculations                     |
               |  Schema: id, calculated_at, magnitude, x, y, z  |
               +-------------------------------------------------+
+
+
+---
+
+📡 API Reference & cURL Verification
+
+All client interactions must be directed to the API Gateway on Port 8080. Direct access to backend ports (8081-8083) should be blocked in production environments.
+
+<b>1. Deploy API Gateway to Cloud Run</b>
+
+Tests the connection through the gateway to any available backend service.
+
+```
+curl -v -u admin:vector-secret-123 http://localhost:8080/api/vectors/ping
+```
+
+Expected Response (200 OK): 
+
+```
+PlaintextController and Service are successfully connected!
+```
+
+<b>2. Calculate Magnitude & Save to Ledger</b>
+
+Calculates $\sqrt{x^2 + y^2 + z^2}$, returns the exact scalar result, and permanently logs the transaction in PostgreSQL.
+
+```
+curl -v -u admin:vector-secret-123 -X POST http://localhost:8080/api/vectors/calculateMagnitude \
+  -H "Content-Type: application/json" \
+  -d "{\"x\": 10.0, \"y\": 20.0, \"z\": 30.0}"
+```
+
+Expected Response (200 OK):JSON 
+
+```
+37.416573867739416
+```
+
+Check your backend terminals: You will see the requests rotate cleanly between Port 8081, 8082, and 8083!
+
+<b>3. Add Vectors (Circuit Breaker Protected)</b>
+
+Adds two 3D vectors together. If the backend math service goes offline or throws an exception, Resilience4j intercepts the failure and returns a default zero-vector.
+
+```
+curl -v -u admin:vector-secret-123 -X POST http://localhost:8080/api/vectors/addVectors \
+  -H "Content-Type: application/json" \
+  -d "{\"v1\": {\"x\": 1.0, \"y\": 2.0, \"z\": 3.0}, \"v2\": {\"x\": 4.0, \"y\": 5.0, \"z\": 6.0}}"
+```
+
+Expected Response (200 OK):JSON
+
+```
+{
+  "x": 5.0,
+  "y": 7.0,
+  "z": 9.0
+}
+```
+
+<b>4. Scale VectorMultiplies a 3D vector's coordinates by a scalar path variable.</b>
+
+```
+curl -v -u admin:vector-secret-123 -X POST http://localhost:8080/api/vectors/scale/3 \
+  -H "Content-Type: application/json" \
+  -d "{\"x\": 1.0, \"y\": 2.0, \"z\": 3.0}"
+```
+
+Expected Response (200 OK):JSON
+
+```
+{
+  "x": 3.0,
+  "y": 6.0,
+  "z": 9.0
+}
+```
+
+<b>5. Retrieve Database Ledger History</b>
+
+Queries PostgreSQL via Spring Data JPA (SELECT * FROM vector_calculations) and returns the complete calculation ledger.Bashcurl -v -u admin:vector-secret-123 http://localhost:8080/api/vectors/history
+Expected Response (200 OK):JSON
+
+```
+[
+  {
+    "id": 1,
+    "x": 10.0,
+    "y": 20.0,
+    "z": 30.0,
+    "magnitude": 37.416573867739416,
+    "calculatedAt": "2026-06-24T17:51:12.524652"
+  }
+]
+```
+
+<b>6. Rate Limiter Exhaustion Test</b>
+
+If you send more than 10 requests within a 30-second window, the gateway's bouncer intercepts the traffic:Bash# Fire rapidly 11 times in a row
+
+```
+curl -v -u admin:vector-secret-123 -X POST http://localhost:8080/api/vectors/calculateMagnitude -H "Content-Type: application/json" -d "{\"x\": 1.0, \"y\": 2.0, \"z\": 3.0}"
+```
+
+Expected Response (429 Too Many Requests):JSON
+
+```
+{
+  "timestamp": "2026-06-24T21:56:40.902+00:00",
+  "path": "/api/vectors/calculateMagnitude",
+  "status": 429,
+  "error": "Too Many Requests",
+  "message": "Rate limit exceeded! You are limited to 10 requests per 30 seconds.",
+  "requestId": "42d6c1d2-5"
+}
+```
+
+🧪 Automated Testing Suite
+
+The system includes an automated integration test harness that spins up an isolated reactive server environment using Spring Boot's @SpringBootTest and WebTestClient.To run the automated security and rate-limiting tests:Bashcd api-gateway
+mvnw clean test
+Test Cases Covered:testHackerAttempt_shouldReturn401Unauthorized: Proves that requests missing Basic Auth headers are blocked at the perimeter before routing.testSpammingServer_shouldTriggerRateLimiter429: Executes a rapid loop of 10 valid requests to fill the sliding window queue, then asserts that the 11th request is rejected with HTTP 429 Too Many Requests.☁️ Google Cloud Platform (GCP) DeploymentThe entire ecosystem is structured for serverless container deployment using Google Cloud Run and Google Cloud SQL.Step 1: Build the Docker ContainersBoth services utilize lightweight Alpine Linux Java runtime containers. The included Dockerfile in each root directory:DockerfileFROM eclipse-temurin:21-jre-alpine
+VOLUME /tmp
+COPY target/*.jar app.jar
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+Compile production JAR artifacts locally:Bashmvnw clean package -DskipTests
+Step 2: Deploy Vector API to Cloud Run (Connected to Cloud SQL)Use the Google Cloud CLI (gcloud) to build and deploy the backend service, injecting Cloud SQL PostgreSQL socket connection properties dynamically:Bashcd Web_Application_Spring
+gcloud run deploy vector-api \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --add-cloudsql-instances YOUR_PROJECT_ID:us-central1:vector-db-instance \
+  --set-env-vars SPRING_DATASOURCE_URL=jdbc:postgresql://google/vector_db?cloudSqlInstance=YOUR_PROJECT_ID:us-central1:vector-db-instance&socketFactory=com.google.cloud.sql.postgres.SocketFactory \
+  --set-env-vars SPRING_DATASOURCE_USERNAME=postgres \
+  --set-env-vars SPRING_DATASOURCE_PASSWORD=your_cloud_password
+Step 3: Deploy API Gateway to Cloud RunOnce the vector-api deploys, take its generated cloud HTTPS URL (e.g., https://vector-api-xyz.a.run.app) and update your Gateway's routing configuration. Then deploy the gateway:Bashcd api-gateway
+gcloud run deploy api-gateway \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated
+Your entire 3D Vector Mathematics Microservice Ecosystem is now live, auto-scaling from 0 to thousands of instances globally on Google Cloud!
