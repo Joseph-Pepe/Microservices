@@ -256,14 +256,41 @@ Expected Response (429 Too Many Requests):JSON
 
 🧪 Automated Testing Suite
 
-The system includes an automated integration test harness that spins up an isolated reactive server environment using Spring Boot's @SpringBootTest and WebTestClient.To run the automated security and rate-limiting tests:Bashcd api-gateway
+The system includes an automated integration test harness that spins up an isolated reactive server environment using Spring Boot's @SpringBootTest and WebTestClient.To run the automated security and rate-limiting tests:
+
+```
+cd api-gateway
 mvnw clean test
-Test Cases Covered:testHackerAttempt_shouldReturn401Unauthorized: Proves that requests missing Basic Auth headers are blocked at the perimeter before routing.testSpammingServer_shouldTriggerRateLimiter429: Executes a rapid loop of 10 valid requests to fill the sliding window queue, then asserts that the 11th request is rejected with HTTP 429 Too Many Requests.☁️ Google Cloud Platform (GCP) DeploymentThe entire ecosystem is structured for serverless container deployment using Google Cloud Run and Google Cloud SQL.Step 1: Build the Docker ContainersBoth services utilize lightweight Alpine Linux Java runtime containers. The included Dockerfile in each root directory:DockerfileFROM eclipse-temurin:21-jre-alpine
+```
+
+Test Cases Covered:
+
+1. testHackerAttempt_shouldReturn401Unauthorized: Proves that requests missing Basic Auth headers are blocked at the perimeter before routing.
+2. testSpammingServer_shouldTriggerRateLimiter429: Executes a rapid loop of 10 valid requests to fill the sliding window queue, then asserts that the 11th request is rejected with HTTP 429 Too Many Requests.
+
+☁️ Google Cloud Platform (GCP) DeploymentThe entire ecosystem is structured for serverless container deployment using Google Cloud Run and Google Cloud SQL.
+
+Step 1: Build the Docker ContainersBoth services utilize lightweight Alpine Linux Java runtime containers. The included Dockerfile in each root directory:Dockerfile
+
+```
+FROM eclipse-temurin:21-jre-alpine
 VOLUME /tmp
 COPY target/*.jar app.jar
 ENTRYPOINT ["java", "-jar", "/app.jar"]
-Compile production JAR artifacts locally:Bashmvnw clean package -DskipTests
-Step 2: Deploy Vector API to Cloud Run (Connected to Cloud SQL)Use the Google Cloud CLI (gcloud) to build and deploy the backend service, injecting Cloud SQL PostgreSQL socket connection properties dynamically:Bashcd Web_Application_Spring
+```
+
+Compile production JAR artifacts locally:
+
+```
+mvnw clean package -DskipTests
+```
+
+Step 2: Deploy Vector API to Cloud Run (Connected to Cloud SQL)
+
+Use the Google Cloud CLI (gcloud) to build and deploy the backend service, injecting Cloud SQL PostgreSQL socket connection properties dynamically:
+
+```
+cd Web_Application_Spring
 gcloud run deploy vector-api \
   --source . \
   --region us-central1 \
@@ -272,9 +299,16 @@ gcloud run deploy vector-api \
   --set-env-vars SPRING_DATASOURCE_URL=jdbc:postgresql://google/vector_db?cloudSqlInstance=YOUR_PROJECT_ID:us-central1:vector-db-instance&socketFactory=com.google.cloud.sql.postgres.SocketFactory \
   --set-env-vars SPRING_DATASOURCE_USERNAME=postgres \
   --set-env-vars SPRING_DATASOURCE_PASSWORD=your_cloud_password
-Step 3: Deploy API Gateway to Cloud RunOnce the vector-api deploys, take its generated cloud HTTPS URL (e.g., https://vector-api-xyz.a.run.app) and update your Gateway's routing configuration. Then deploy the gateway:Bashcd api-gateway
+```
+
+Step 3: Deploy API Gateway to Cloud RunOnce the vector-api deploys, take its generated cloud HTTPS URL (e.g., https://vector-api-xyz.a.run.app) and update your Gateway's routing configuration. Then deploy the gateway:
+
+```
+cd api-gateway
 gcloud run deploy api-gateway \
   --source . \
   --region us-central1 \
   --allow-unauthenticated
-Your entire 3D Vector Mathematics Microservice Ecosystem is now live, auto-scaling from 0 to thousands of instances globally on Google Cloud!
+```
+
+Microservice Ecosystem is now live, auto-scaling from 0 to thousands of instances globally on Google Cloud!
