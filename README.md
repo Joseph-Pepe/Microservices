@@ -56,8 +56,8 @@ The application follows a modern N-Tier distributed microservice architecture:
 |                      | • Eviction: Auto 30s TTL          |                       | 
 |                      +-----------------------------------+                       |
 +----------------------------------------------------------------------------------+
-                              Hibernate ORM / JDBC
-                 \                     |                     /
+                    Hibernate ORM / JDBC (Repository Bridge)
+                  |                    |                    |
                   v                    v                    v
               +-------------------------------------------------+
               |             PostgreSQL Database                 |
