@@ -14,11 +14,11 @@ The application follows a modern N-Tier distributed microservice architecture:
               |  (cURL, React / Angular Frontend, Mobile Apps)  |
               +-------------------------------------------------+
                                        |
-                                       | HTTP POST/GET (Basic Auth: admin / vector-secret-123)             Reactive String Redis
+                                       | HTTP POST/GET (Basic Auth: admin / vector-secret-123)             
                                        v                                                            +-----------------------------------+
               +-------------------------------------------------+                                   |           Redis Cluster           | 
               |          Spring Cloud API Gateway               |                                   |            (Port 6379)            |
-              |                (Port 8080)                      |                                   +-----------------------------------+
+              |                (Port 8080)                      |       Reactive String Redis       +-----------------------------------+
               +-------------------------------------------------+ <-------------------------------> | • Key: rate_limit:{username}      |
               |  1. Perimeter Firewall (Spring Security WebFlux)|                                   | • Data: Sorted Set (ZSET)         |
               |  2. Distributed Rate Limiter (Redis ZSET Engine)|                                   | • Score: Epoch Millis Timestamp   |
