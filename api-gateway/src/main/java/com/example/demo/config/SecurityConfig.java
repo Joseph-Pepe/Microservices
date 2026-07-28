@@ -2,6 +2,7 @@ package com.example.demo.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.userdetails.MapReactiveUserDetailsService;
@@ -18,23 +19,29 @@ public class SecurityConfig {
     @Bean
     public SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
         http
-            // 1. Disable CSRF (Standard practice for REST APIs)
+            // 1. Disable CSRF and browser form logins for stateless REST API routing
             .csrf(csrf -> csrf.disable()) 
+
+            // 2. Disable the browser HTML form login interface to theown a clean 401 unauthorized headers to tools like curl or web applications.
+            .formLogin(formLogin -> formLogin.disable())
+            .httpBasic(httpBasic -> httpBasic.disable())
             
-            // 2. Define our routing rules
+            // 3. Define routing authorization rules
             .authorizeExchange(exchanges -> exchanges
                 .pathMatchers("/api/vectors/ping").permitAll() // Let anyone ping the server to see if it's alive
-                .pathMatchers("/api/vectors/**").authenticated() // Force a password for all actual math operations
+                .pathMatchers("/api/vectors/**").authenticated() // Require valid JWT for math operations
                 .anyExchange().denyAll() // Block anything else we haven't explicitly thought of
             )
-            
-            // 3. Tell Spring to use standard HTTP Basic Authentication (Username/Password in the header)
-            .httpBasic(httpBasic -> {}); 
+
+            // 4. Configure a stateless JWT OAuth2 Resource Server.
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(Customizer.withDefaults())
+            );
 
         return http.build();
     }
 
-    // Create a hardcoded user in memory so we can test it immediately
+    // Create a hardcoded user in memory so we can test it immediately (i.e., ideal for local integration testing, but not production environments).
     @Bean
     public MapReactiveUserDetailsService userDetailsService() {
         UserDetails admin = User.builder()
@@ -46,10 +53,11 @@ public class SecurityConfig {
         return new MapReactiveUserDetailsService(admin);
     }
     
+    // 4. THE REDIS BRIDGE: Works seamlessly with JWTs! Feeds the user identity into the Redis rate limiter.
     @Bean
     public KeyResolver userKeyResolver() {
         return exchange -> exchange.getPrincipal()
-            .map(principal -> principal.getName()) // Track tokens by their login username!
+            .map(principal -> principal.getName()) // Automatically pulls the 'sub' (username) claim from the JWT! Track tokens by their login username! 
             .defaultIfEmpty("anonymous");          // If they aren't logged in, group them in an anonymous bucket
     }
     
