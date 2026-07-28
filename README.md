@@ -8,58 +8,86 @@ This system handles real-time computations, protected by reactive security, in-m
 
 The application follows a modern N-Tier distributed microservice architecture:
 
-```tezt
-              +-------------------------------------------------+
-              |              External Web Clients               |
-              |  (cURL, React / Angular Frontend, Mobile Apps)  |
-              +-------------------------------------------------+
-                                       |
-                                       | HTTP POST/GET (Basic Auth: admin)             
-                                       v                                                            
-              +-------------------------------------------------+       +-----------------------------------+ 
-              |          Spring Cloud API Gateway               |       |           Redis Cluster           |
-              |                (Port 8080)                      |       |            (Port 6379)            |
-              +-------------------------------------------------+ <---> +-----------------------------------+
-              |  1. Perimeter Firewall (Spring Security WebFlux)|       | • Key: rate_limit:{username}      |
-              |  2. Distributed Rate Limiter (Redis ZSET Engine)|       | • Data: Sorted Set (ZSET)         |
-              |  3. Client-Side Load Balancer (Round-Robin)     |       | • Score: Epoch Millis Timestamp   |
-              +-------------------------------------------------+       | • Eviction: Auto 30s TTL          |
-                                       |                                +-----------------------------------+
-                              (Round-Robin Routing)
-                                       |
-                +----------------------+----------------------+
-                |                      |                      |
-         lb://vector-service    lb://vector-service    lb://vector-service
-                |                      |                      |
-                v                      v                      v         
-+----------------------------------------------------------------------------------+
-|                              Microservice Cluster                                |
-|                            (Ports 8081, 8082, 8083)                              |
-|    +----------------------+ +----------------------+ +----------------------+    |
-|    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |    |      ┌──────────────────────────────────────────────────┐
-|    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |    |      │         Microservice Internal Layers             │
-|    +----------------------+ +----------------------+ +----------------------+    |      ├──────────────────────────────────────────────────┤
-|    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |    |      │ ├── Controller Layer (Thin HTTP Handlers)        │
-|    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |    |      │ ├── Service Layer (Math & Business Logic)        │
-|    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |    |      │ ├── Circuit Breaker (Resilience4j Fallbacks)     │
-|    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |    |      │ └── Repository Layer (Hibernate ORM Bridge)      │
-|    +----------------------+ +----------------------+ +----------------------+    |      └──────────────────────────────────────────────────┘ 
-|                                                                                  | 
-+----------------------------------------------------------------------------------+
-                                       |
-                     Hibernate ORM / JDBC (Repository Bridge)
-                                       |                    
-                  +--------------------+--------------------+
-                  |                    |                    |
-                  v                    v                    v
-              +-------------------------------------------------+
-              |             PostgreSQL Database                 |
-              |         (Port 5432 / GCP Cloud SQL)             |
-              +-------------------------------------------------+
-              |  • Table: vector_calculations                   |
-              |  • HikariCP Connection Pools                    |
-              +-------------------------------------------------+
+```text
+RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
+                                         |
+                                         v
++-------------------------------------------------------------------------------+
+|               SPRING SECURITY WEBFLUX (The Perimeter Firewall)                |
++-------------------------------------------------------------------------------+
+|  Rule 1: Path Verification                                                    |
+|          • Is it "/api/vectors/ping"? ──► [PASS PUBLICLY]                     |
+|          • Is it protected "/api/vectors/**"? ──► [PROCEED TO SECURITY SCAN]   |
+|                                                                               |
+|  Rule 2: Cryptographic Token Scan (.oauth2ResourceServer())                   |
+|          • Is the Bearer token present? (No ──► 401 Unauthorized)             |
+|          • Is the RSA signature valid against local JWKS cache?               |
+|            (Tampered/Expired ──► 401 Unauthorized)                            |
+|                                                                               |
+|  Rule 3: Context Hydration                                                    |
+|          • Extract "sub" claim (e.g., "admin") and build a Reactive           |
+|            SecurityContext Principal.                                         |
++-------------------------------------------------------------------------------+
+                                         |
+                                         v
+                 SUCCESSFUL FIREWALL CLEARANCE! (Passes down to 
+                 Redis KeyResolver & Round-Robin Load Balancer)
+```
 
+```text
+                                          +-------------------------------------------------+
+                                          |              External Web Clients               |
+                                          |  (cURL, React / Angular Frontend, Mobile Apps)  |
+                                          +-------------------------------------------------+
+                                                    |                            |
+                               1. Authenticate &    |                            | 2. HTTP POST/GET (API Request)
+                                  Obtain Bearer JWT |                            |    Header: Authorization: Bearer <JWT>
+                                                    v                            v
++-----------------------------------+     +-------------------------------------------------+       +--------------------------------------+
+|      Commercial IDaaS Cloud       |     |          Spring Cloud API Gateway               |       |              Redis Cluster           |
+|  (Auth0 / Okta / AWS Cognito)     |     |                (Port 8080)                      |       |              (Port 6379)             |
++-----------------------------------+     +-------------------------------------------------+ <---> +--------------------------------------+
+| • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. OAuth2 Resource Server (Stateless JWT)      |       | • Key: rate_limit:{username=jwt.sub}|
+| • Hosts /.well-known/jwks.json    |     |  2. JWKS Public Key Cache (Offline Crypto)      |       | • Data: Sorted Set (ZSET)            |
++-----------------------------------+     |  3. Distributed Rate Limiter (Redis ZSET Engine)|       | • Score: Epoch Millis Timestamp      |
+                                          |  4. Client-Side Load Balancer (Round-Robin)     |       | • Eviction: Auto 30s TTL             |
+                                          |  5. Perimeter Firewall (Spring Security WebFlux)|       +--------------------------------------+
+                                          +-------------------------------------------------+       
+                                                                   |
+                                                          (Round-Robin Routing)
+                                                                   |
+                                            +----------------------+----------------------+
+                                            |                      |                      |
+                                     lb://vector-service    lb://vector-service    lb://vector-service
+                                            |                      |                      |
+                                            v                      v                      v
+                            +----------------------------------------------------------------------------------+
+                            |                              Microservice Cluster                                |
+                            |                            (Ports 8081, 8082, 8083)                              |
+                            |    +----------------------+ +----------------------+ +----------------------+    |   ┌──────────────────────────────────────────────────┐
+                            |    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |    |   │         Microservice Internal Layers             │
+                            |    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |    |   ├──────────────────────────────────────────────────┤
+                            |    +----------------------+ +----------------------+ +----------------------+    |   │ ├── Controller Layer (Thin HTTP Handlers)        │
+                            |    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |    |   │ ├── Service Layer (Math & Business Logic)        │
+                            |    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |    |   │ ├── Circuit Breaker (Resilience4j Fallbacks)     │
+                            |    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |    |   │ └── Repository Layer (Hibernate ORM Bridge)      │
+                            |    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |    |   └──────────────────────────────────────────────────┘
+                            |    +----------------------+ +----------------------+ +----------------------+    |         
+                            |                                                                                  | 
+                            +----------------------------------------------------------------------------------+
+                                                                   |
+                                                 Hibernate ORM / JDBC (Repository Bridge)
+                                                                   |                    
+                                               +-------------------+-------------------+
+                                               |                   |                   |
+                                               v                   v                   v
+                                           +-------------------------------------------------+
+                                           |             PostgreSQL Database                 |
+                                           |         (Port 5432 / GCP Cloud SQL)             |
+                                           +-------------------------------------------------+
+                                           |  • Table: vector_calculations                   |
+                                           |  • HikariCP Connection Pools                    |
+                                           +-------------------------------------------------+
 ```
 
 ## 🛠️ Technology Stack
