@@ -48,7 +48,7 @@ The application follows a modern N-Tier distributed microservice architecture:
 +----------------------------------------------------------------------------------+
                                        |
                     Hibernate ORM / JDBC (Repository Bridge)
-                  |                    |                    |
+                                       |                    
                   +--------------------+--------------------+
                   |                    |                    |
                   v                    v                    v
