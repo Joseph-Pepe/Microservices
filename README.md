@@ -14,7 +14,7 @@ The application follows a modern N-Tier distributed microservice architecture:
               |  (cURL, React / Angular Frontend, Mobile Apps)  |
               +-------------------------------------------------+
                                        |
-                                       | HTTP POST/GET (Basic Auth: admin / vector-secret-123)             
+                                       | HTTP POST/GET (Basic Auth: admin)             
                                        v                                                            
               +-------------------------------------------------+       +-----------------------------------+ 
               |          Spring Cloud API Gateway               |       |           Redis Cluster           |
