@@ -8,6 +8,7 @@ This system handles real-time computations, protected by reactive security, in-m
 
 The application follows a modern N-Tier distributed microservice architecture:
 
+```tezt
               +-------------------------------------------------+
               |              External Web Clients               |
               |  (cURL, React / Angular Frontend, Mobile Apps)  |
@@ -66,6 +67,7 @@ The application follows a modern N-Tier distributed microservice architecture:
               |  • HikariCP Connection Pools                    |
               +-------------------------------------------------+
 
+```
 
 ## 🛠️ Technology Stack
 
