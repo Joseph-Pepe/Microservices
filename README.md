@@ -15,16 +15,16 @@ The application follows a modern N-Tier distributed microservice architecture:
               +-------------------------------------------------+
                                        |
                                        | HTTP POST/GET (Basic Auth: admin / vector-secret-123)             
-                                       v                                                            +-----------------------------------+
-              +-------------------------------------------------+                                   |           Redis Cluster           | 
-              |          Spring Cloud API Gateway               |                                   |            (Port 6379)            |
-              |                (Port 8080)                      |       Reactive String Redis       +-----------------------------------+
-              +-------------------------------------------------+ <-------------------------------> | • Key: rate_limit:{username}      |
-              |  1. Perimeter Firewall (Spring Security WebFlux)|                                   | • Data: Sorted Set (ZSET)         |
-              |  2. Distributed Rate Limiter (Redis ZSET Engine)|                                   | • Score: Epoch Millis Timestamp   |
-              |  3. Client-Side Load Balancer (Round-Robin)     |                                   | • Eviction: Auto 30s TTL          |
-              +-------------------------------------------------+                                   +-----------------------------------+
-                                       |
+                                       v                                                            
+              +-------------------------------------------------+                                   +-----------------------------------+ 
+              |          Spring Cloud API Gateway               |                                   |           Redis Cluster           |
+              |                (Port 8080)                      |       Reactive String Redis       |            (Port 6379)            |
+              +-------------------------------------------------+ <-------------------------------> +-----------------------------------+
+              |  1. Perimeter Firewall (Spring Security WebFlux)|                                   | • Key: rate_limit:{username}      |
+              |  2. Distributed Rate Limiter (Redis ZSET Engine)|                                   | • Data: Sorted Set (ZSET)         |
+              |  3. Client-Side Load Balancer (Round-Robin)     |                                   | • Score: Epoch Millis Timestamp   |
+              +-------------------------------------------------+                                   | • Eviction: Auto 30s TTL          |
+                                       |                                                            +-----------------------------------+
                               (Round-Robin Routing)
                                        |
                 +----------------------+----------------------+
