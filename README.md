@@ -36,14 +36,14 @@ The application follows a modern N-Tier distributed microservice architecture:
 |                              Microservice Cluster                                |
 |                            (Ports 8081, 8082, 8083)                              |
 |    +----------------------+ +----------------------+ +----------------------+    |
-|    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |    |      
-|    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |    |      ┌──────────────────────────────────────────────────┐
-|    +----------------------+ +----------------------+ +----------------------+    |      │  ├── Controller Layer (Thin HTTP Handlers)       │
-|    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |    |      |  ├── Service Layer (Math & Business Logic)       |
-|    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |    |      │  ├── Circuit Breaker (Resilience4j Fallbacks)    │
-|    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |    |      │  └── Repository Layer (Hibernate ORM Bridge)     │
-|    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |    |      └──────────────────────┬───────────────────────────┘
-|    +----------------------+ +----------------------+ +----------------------+    |         
+|    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |    |      ┌──────────────────────────────────────────────────┐
+|    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |    |      │         Microservice Internal Layers             │
+|    +----------------------+ +----------------------+ +----------------------+    |      ├──────────────────────────────────────────────────┤
+|    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |    |      │ ├── Controller Layer (Thin HTTP Handlers)        │
+|    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |    |      │ ├── Service Layer (Math & Business Logic)        │
+|    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |    |      │ ├── Circuit Breaker (Resilience4j Fallbacks)     │
+|    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |    |      │ └── Repository Layer (Hibernate ORM Bridge)      │
+|    +----------------------+ +----------------------+ +----------------------+    |      └──────────────────────────────────────────────────┘ 
 |                                                                                  | 
 +----------------------------------------------------------------------------------+
                     Hibernate ORM / JDBC (Repository Bridge)
