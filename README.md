@@ -9,6 +9,32 @@ This system handles real-time computations, protected by reactive security, in-m
 The application follows a modern N-Tier distributed microservice architecture:
 
 ```text
+RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
+                                         |
+                                         v
++-------------------------------------------------------------------------------+
+|               SPRING SECURITY WEBFLUX (The Perimeter Firewall)                |
++-------------------------------------------------------------------------------+
+|  Rule 1: Path Verification                                                    |
+|          • Is it "/api/vectors/ping"? ──► [PASS PUBLICLY]                     |
+|          • Is it protected "/api/vectors/**"? ──► [PROCEED TO SECURITY SCAN]   |
+|                                                                               |
+|  Rule 2: Cryptographic Token Scan (.oauth2ResourceServer())                   |
+|          • Is the Bearer token present? (No ──► 401 Unauthorized)             |
+|          • Is the RSA signature valid against local JWKS cache?               |
+|            (Tampered/Expired ──► 401 Unauthorized)                            |
+|                                                                               |
+|  Rule 3: Context Hydration                                                    |
+|          • Extract "sub" claim (e.g., "admin") and build a Reactive           |
+|            SecurityContext Principal.                                         |
++-------------------------------------------------------------------------------+
+                                         |
+                                         v
+                 SUCCESSFUL FIREWALL CLEARANCE! (Passes down to 
+                 Redis KeyResolver & Round-Robin Load Balancer)
+```
+
+```text
                                           +-------------------------------------------------+
                                           |              External Web Clients               |
                                           |  (cURL, React / Angular Frontend, Mobile Apps)  |
