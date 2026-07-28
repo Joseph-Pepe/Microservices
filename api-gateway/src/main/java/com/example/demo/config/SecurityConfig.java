@@ -25,15 +25,15 @@ public class SecurityConfig {
             // 2. Disable the browser HTML form login interface to theown a clean 401 unauthorized headers to tools like curl or web applications.
             .formLogin(formLogin -> formLogin.disable())
             .httpBasic(httpBasic -> httpBasic.disable())
-            
-            // 3. Define routing authorization rules
+
+            // 3. The Firewall's Access Control List (ACL)! Define routing authorization rules (Enhances Spring Security WebFlux)
             .authorizeExchange(exchanges -> exchanges
                 .pathMatchers("/api/vectors/ping").permitAll() // Let anyone ping the server to see if it's alive
                 .pathMatchers("/api/vectors/**").authenticated() // Require valid JWT for math operations
                 .anyExchange().denyAll() // Block anything else we haven't explicitly thought of
             )
 
-            // 4. Configure a stateless JWT OAuth2 Resource Server.
+            // 4. The Firewall's Scanning Mechanism! Configure a stateless JWT OAuth2 Resource Server.
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(Customizer.withDefaults())
             );
