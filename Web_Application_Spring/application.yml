@@ -18,7 +18,8 @@ spring:
 # Resilience4j MUST be at the root level (all the way to the left), not inside 'spring'
 resilience4j.circuitbreaker:
   instances:
-    vectorMathService:               # CRITICAL FIX: This must match the exact 'name' in your @CircuitBreaker annotation!
+    vectorMathService:               # Must match the 'name' attribute in @CircuitBreaker annotation!
       slidingWindowSize: 10          # Check the last 10 requests
-      failureRateThreshold: 50       # Trip if 50% of them fail
-      waitDurationInOpenState: 5000ms # Stay OPEN for 5 seconds before trying again
+      failureRateThreshold: 50       # If 50% (3+ out of 5) of them fail, TRIP THE BREAKER!
+      waitDurationInOpenState: 5000ms # Stay open (blocking traffic) for 5 seconds before trying again.
+      permittedNumberOfCallsInHalfOpenState: 2 # Let 2 test requests in to see if the server recovered

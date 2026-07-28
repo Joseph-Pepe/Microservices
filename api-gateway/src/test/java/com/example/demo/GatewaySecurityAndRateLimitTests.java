@@ -5,7 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.reactive.server.WebTestClient;
-
+import java.util.Objects;
 import java.time.Duration;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -24,7 +24,7 @@ class GatewaySecurityAndRateLimitTests {
     @Test
     void testSpammingServer_shouldTriggerRateLimiter429() {
         WebTestClient patientClient = webClient.mutate()
-                .responseTimeout(Duration.ofSeconds(10))
+                .responseTimeout(java.util.Objects.requireNonNull(Duration.ofSeconds(10)))
                 .build();
 
         // 1. We use a loop to rapidly fire 10 valid requests.

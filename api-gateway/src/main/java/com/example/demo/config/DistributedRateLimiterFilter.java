@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import java.util.Objects;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -70,7 +71,7 @@ public class DistributedRateLimiterFilter implements GlobalFilter, Ordered {
                                 .then(
                                     // 5. Reset the key's TTL to 30 seconds (EXPIRE) to prevent memory leaks.
                                     // If the user logs off, Redis automatically deletes the entire key from RAM!
-                                    redisTemplate.expire(redisKey, Duration.ofSeconds(30))
+                                    redisTemplate.expire(redisKey, java.util.Objects.requireNonNull(Duration.ofSeconds(30)))
                                 )
                                 .then(chain.filter(exchange));
                     });

@@ -5,6 +5,9 @@ import com.example.demo.model.VectorCalculation;
 import com.example.demo.model.VectorPair;
 import com.example.demo.repository.VectorCalculationRepository;
 
+// CIRCUIT BREAKER
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -33,12 +36,24 @@ public class Vector3DService {
     private String serverPort;
 
     // All the actual math lives here now!
-    public Vector3D addVectors(VectorPair vPair) {
+    // curl -v -u admin:vector-secret-123 -X POST http://localhost:8080/api/vectors/addVectors -H "Content-Type: application/json" -d "{\"v1\": {\"x\": 1.0, \"y\": 2.0, \"z\": 3.0}, \"v2\": {\"x\": 4.0, \"y\": 5.0, \"z\": 6.0}}"
+    @CircuitBreaker(name = "vectorMathService", fallbackMethod = "addVectorsFallback") // Binds this method to the fallback below
+    public Vector3D addVectors(VectorPair vPair) {        
         return new Vector3D(
             vPair.v1().x() + vPair.v2().x(),
             vPair.v1().y() + vPair.v2().y(),
             vPair.v1().z() + vPair.v2().z()
         );
+    }
+
+    // --- THE FALLBACK METHOD ---
+    // Must match the exact signature of addVectors(), plus a Throwable parameter at the end.
+    public Vector3D addVectorsFallback(VectorPair vPair, Throwable ex) {
+        log.error("Circuit breaker tripped for addVectors! Returning safe default. Reason: {}", ex.getMessage());
+        
+        // Return a "safe" default response so the client doesn't crash.
+        // For vector addition, returning a zero-vector is a standard safe fallback.
+        return new Vector3D(0.0, 0.0, 0.0); 
     }
 
     // Scale a Vector
