@@ -14,16 +14,16 @@ The application follows a modern N-Tier distributed microservice architecture:
               |  (cURL, React / Angular Frontend, Mobile Apps)  |
               +-------------------------------------------------+
                                        |
-                                       | HTTP POST/GET (Basic Auth: admin / vector-secret-123)
-                                       v
-              +-------------------------------------------------+
-              |          Spring Cloud API Gateway               |
-              |                (Port 8080)                      |
-              +-------------------------------------------------+
-              |  1. Perimeter Firewall (Spring Security WebFlux)|
-              |  2. Distributed Rate Limiter (Redis ZSET Engine)|
-              |  3. Client-Side Load Balancer (Round-Robin)     |
-              +-------------------------------------------------+
+                                       | HTTP POST/GET (Basic Auth: admin / vector-secret-123)             Reactive String Redis
+                                       v                                                            +-----------------------------------+
+              +-------------------------------------------------+                                   |           Redis Cluster           | 
+              |          Spring Cloud API Gateway               |                                   |            (Port 6379)            |
+              |                (Port 8080)                      |                                   +-----------------------------------+
+              +-------------------------------------------------+ <-------------------------------> | • Key: rate_limit:{username}      |
+              |  1. Perimeter Firewall (Spring Security WebFlux)|                                   | • Data: Sorted Set (ZSET)         |
+              |  2. Distributed Rate Limiter (Redis ZSET Engine)|                                   | • Score: Epoch Millis Timestamp   |
+              |  3. Client-Side Load Balancer (Round-Robin)     |                                   | • Eviction: Auto 30s TTL          |
+              +-------------------------------------------------+                                   +-----------------------------------+
                                        |
                               (Round-Robin Routing)
                                        |
@@ -45,16 +45,6 @@ The application follows a modern N-Tier distributed microservice architecture:
 |    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |    |      └──────────────────────┬───────────────────────────┘
 |    +----------------------+ +----------------------+ +----------------------+    |         
 |                                                                                  | 
-|                              Reactive String Redis                               |
-|                      +-----------------------------------+                       |  
-|                      |            Redis Cluster          |                       |
-|                      |            (Port 6379)            |                       | 
-|                      +-----------------------------------+                       |
-|                      | • Key: rate_limit:{username}      |                       | 
-|                      | • Data: Sorted Set (ZSET)         |                       |
-|                      | • Score: Epoch Millis Timestamp   |                       | 
-|                      | • Eviction: Auto 30s TTL          |                       | 
-|                      +-----------------------------------+                       |
 +----------------------------------------------------------------------------------+
                     Hibernate ORM / JDBC (Repository Bridge)
                   |                    |                    |
