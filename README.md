@@ -33,7 +33,7 @@ The application follows a modern N-Tier distributed microservice architecture:
                 |                      |                      |
                 v                      v                      v         
 +----------------------------------------------------------------------------------+
-|                          Vector Microservice Cluster                             |
+|                              Microservice Cluster                                |
 |                            (Ports 8081, 8082, 8083)                              |
 |    +----------------------+ +----------------------+ +----------------------+    |
 |    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |    |      
