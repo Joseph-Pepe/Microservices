@@ -19,3 +19,8 @@ spring:
           uri: lb://vector-service 
           predicates:
             - Path=/api/vectors/**
+    # Redis 
+    data:
+      redis:
+        host: localhost
+        port: 6379
