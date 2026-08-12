@@ -2,11 +2,23 @@ server:
   port: 8081
 
 spring:
+  # 1. OPT-IN TO VIRTUAL THREADS: Matches the Gateway's internal scale
+  threads:
+    virtual:
+      enabled: true
+
   datasource:
     url: jdbc:postgresql://localhost:5432/vector_db
     username: postgres
     password: your_super_secret_password
     driver-class-name: org.postgresql.Driver
+
+    # 2. HIKARICP POOL OPTIMIZATION: Prevents Virtual Thread context starvation
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      idle-timeout: 30000
+      pool-name: VectorHikariCP
   jpa:
     hibernate:
       ddl-auto: update # This tells Hibernate to automatically create your database tables based on your Java code!

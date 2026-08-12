@@ -2,6 +2,8 @@ package com.example.demo.controllers;
 
 import com.example.demo.model.Vector3D;
 import com.example.demo.services.Vector3DService;
+import com.example.demo.security.GatewaySecurityFilter;
+
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,8 +20,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 // Tells Spring to ONLY load the web layer and this specific controller
 @WebMvcTest(controllers = Vector3DController.class)
 
-// Explicitly tell Spring Boot to load your controller and service classes into this test sandbox
-@ContextConfiguration(classes = {Vector3DController.class, Vector3DService.class})
+// Explicitly tell Spring Boot to load your GatewaySecurityFilter, controller and service classes into this test sandbox so it intercepts traffic.
+@ContextConfiguration(classes = {Vector3DController.class, Vector3DService.class, GatewaySecurityFilter.class})
 
 // Simulates HTTP traffic without actually starting a real web server.
 class Vector3DControllerTest {
@@ -46,11 +48,30 @@ class Vector3DControllerTest {
 
         // 2. Assert: Send the request and check the response (i.e., make sure the endpoint returns the correct JSON and status codes)
         mockMvc.perform(post("/api/vectors/addVectors")
+                .header("X-Gateway-Validated", "true") // Pass the perimeter security check!
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(requestJson))
                 .andExpect(status().isOk()) // Expect a 200 OK status
                 .andExpect(jsonPath("$.x").value(5.0)) // Check the JSON output
                 .andExpect(jsonPath("$.y").value(7.0))
                 .andExpect(jsonPath("$.z").value(9.0));
+    }
+
+    @Test
+    void testAddVectorsEndpoint_withoutGatewayHeader_shouldReturn403Forbidden() throws Exception {
+        // Assert: Send the exact same request, but FORGET the header
+        String requestJson = """
+                {
+                  "v1": { "x": 1.0, "y": 2.0, "z": 3.0 },
+                  "v2": { "x": 4.0, "y": 5.0, "z": 6.0 }
+                }
+                """;
+
+        // Because the header is missing, the GatewaySecurityFilter should intercept it and throw a 403.
+        mockMvc.perform(post("/api/vectors/addVectors")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isForbidden()) // 3. EXPECT A 403 REJECTION
+                .andExpect(jsonPath("$.error").value("Forbidden"));
     }
 }

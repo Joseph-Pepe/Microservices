@@ -17,7 +17,7 @@ import java.util.Map;
     - if a user sends a malformed request this intercepts failures globally and transforms them into clean, predictable error payloads.
     - keeps internal code structures secure and APIs easier for frontend to consume.
 */
-// CHANGED: Now it ONLY watches your controllers, leaving Swagger to work in peace!
+// Now it ONLY watches your controllers, leaving Swagger to work in peace!
 @RestControllerAdvice(basePackages = "com.example.demo.controllers")
 public class GlobalExceptionHandler {
 
@@ -70,4 +70,16 @@ public class GlobalExceptionHandler {
 
         return new ResponseEntity<>(errorDetails, HttpStatus.BAD_REQUEST);
     }
+
+    // 4. Handle Direct Microservice Ingress Violations (403 Forbidden)
+    // @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    // public ResponseEntity<Map<String, Object>> handleAccessDenied(org.springframework.security.access.AccessDeniedException ex) {
+    //     Map<String, Object> errorDetails = new HashMap<>();
+    //     errorDetails.put("timestamp", LocalDateTime.now().toString());
+    //     errorDetails.put("status", HttpStatus.FORBIDDEN.value());
+    //     errorDetails.put("error", "Forbidden");
+    //     errorDetails.put("message", ex.getMessage());
+
+    //     return new ResponseEntity<>(errorDetails, HttpStatus.FORBIDDEN);
+    // }
 }
