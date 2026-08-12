@@ -2,7 +2,7 @@
 
 An enterprise-grade, horizontally scalable microservice architecture engineered with **Java 21 Virtual Threads**, **Spring Boot 4+**, **Spring Cloud Gateway MVC**, and **PostgreSQL**. 
 
-This system handles real-time computations, protected by stateless OAuth2 (JWT) security, an atomic distributed Redis rate limiter, and client-side load balancing. It is fully containerized and cloud-ready for **Google Cloud Platform (GCP)**.
+This system handles real-time computations, protected by stateless **OAuth2 (JWT)** security, an atomic distributed Redis rate limiter, and client-side load balancing. It is fully containerized and cloud-ready for **Google Cloud Platform (GCP)**.
 
 ## 🏛️ System Architecture
 
