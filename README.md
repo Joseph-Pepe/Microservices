@@ -169,28 +169,32 @@ netstat -ano | findstr 5432
 * Default denyAll() fail-closed architecture ensures unmapped routes are never accidentally exposed.
 * Handles global CORS preflight (OPTIONS) requests seamlessly for React/Angular frontend integration.
 
-### 3. Distributed Redis Rate Limiter (DistributedRateLimiterFilter.java)
+### 3. Distributed Atomic Rate Limiter with Fail-Open Safety (DistributedRateLimiterFilter.java)
 * Executes an Atomic Lua Script across a single network round-trip to completely prevent race conditions (TOCTOU).
-* Tracks user timestamps across a rolling **30-second window**.
-* Limits authenticated users across the entire cluster (e.g., 10 requests per 30 seconds, fully configurable via @Value annotations) to shield backend servers from DDoS attacks and API spam.
+* Tracks user timestamps across a rolling **30-second window**, limiting authenticated users across the cluster (e.g., 10 requests per 30 seconds, fully configurable via @Value annotations) to shield backend servers from DDoS attacks and API spam.
 * Returns standardized 429 Too Many Requests responses with unique request tracking IDs when cluster limits are exhausted.
+* Engineered with a Fail-Open resiliency strategy: If the Redis cluster goes down, a try-catch safety block catches the exception, logs a critical alert, and allows API traffic to pass through uninterrupted rather than generating cascading 500 errors.
 
-### 4. Client-Side Load Balancing (`spring-cloud-starter-loadbalancer`)
+### 4. Downstream Header Hydration & Security Offloading
+* The gateway handles cryptographically heavy JWT verification at the perimeter.
+* Offloads execution weight from downstream nodes by appending an automated upstream identity confirmation header (X-Gateway-Validated: true) to safe, routed requests.
+
+### 5. Client-Side Load Balancing (`spring-cloud-starter-loadbalancer`)
 * Configured with simple instance discovery (`lb://vector-service`) mapping traffic across multiple ports (`8081`, `8082`, `8083`).
 * Distributes compute load using a **Round-Robin** algorithm, ensuring uniform CPU utilization across all active microservice clones.
 
-### 5. Circuit Breaker & Fault Tolerance (`Resilience4j`)
+### 6. Circuit Breaker & Fault Tolerance (`Resilience4j`)
 * Wraps critical math operations with @CircuitBreaker (e.g., like vector addition: `@CircuitBreaker(name = "vectorMathService", fallbackMethod = "addVectorsFallback")`) .
 * Automatically trips when backend error thresholds are exceeded, instantly rerouting traffic to a fallback method that returns a safe default (zero-vector `{x:0, y:0, z:0}`) to prevent catastrophic cascading system failures.
 
-### 6. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
+### 7. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
 * Uses thin interfaces (`VectorCalculationRepository`) extending `JpaRepository` to eliminate boilerplate JDBC code.
 * Configured with `ddl-auto: update`, allowing Hibernate to dynamically inspect and generate PostgreSQL database tables (`vector_calculations`) at startup.
 * Implements ACID-compliant persistence, saving timestamped vector inputs and calculated magnitudes into a permanent ledger.
 
-### 7. Automated Reactive Integration Testing (`WebTestClient`)
-* Complete automated test suite (`GatewaySecurityAndRateLimitTests.java`) designed for WebFlux asynchronous pipelines.
-* Uses custom timeout mutations (`Duration.ofSeconds(10)`) to gracefully handle server cold-starts while mathematically verifying perimeter security drops and rate-limiter queue exhaustion.
+### 8. High-Throughput Integration Testing (`WebTestClient`)
+* Complete automated test suite (`GatewaySecurityAndRateLimitTests.java`) matching the synchronous Servlet architecture.
+* Utilizes `@ActiveProfiles("local")` and custom timeout mutations to verify edge-case security failures and rate-limiter exhaustion.
 
 ---
 
@@ -275,7 +279,7 @@ Expected Response (200 OK):JSON
 Queries PostgreSQL via Spring Data JPA (SELECT * FROM vector_calculations) and returns the complete calculation ledger.
 
 ```
-curl -v -u admin:vector-secret-123 http://localhost:8080/api/vectors/history
+curl -v -H "Authorization: Bearer mock-test-token" http://localhost:8080/api/vectors/history
 ```
 
 Expected Response (200 OK):JSON
@@ -404,7 +408,7 @@ gcloud run deploy api-gateway \
   --set-env-vars SPRING_DATA_REDIS_PORT=6379 \
   --set-env-vars APP_RATE_LIMIT_WINDOW_MS=30000 \
   --set-env-vars APP_RATE_LIMIT_LIMIT=10 \
-  --set-env-vars APP_CORS_ALLOWED_ORIGINS="[https://your-frontend-domain.com](https://your-frontend-domain.com)" \
+  --set-env-vars APP_CORS_ALLOWED_ORIGINS="https://your-frontend-domain.com" \
   --set-env-vars SPRING_THREADS_VIRTUAL_ENABLED=true
 ```
 

@@ -111,15 +111,22 @@ public class DistributedRateLimiterFilter extends OncePerRequestFilter {
         // We use a Redis Sorted Set (ZSET). 
         String uniqueMember = nowMillis + "-" + UUID.randomUUID().toString().substring(0, 8); // The "Score" is the timestamp, and the "Value" is a unique string (timestamp + UUID)
 
-        // Single atomic execution in 1 round trip!
-        Long result = redisTemplate.execute(
-            Objects.requireNonNull(rateLimitScript),
-            Objects.requireNonNull(Collections.singletonList(redisKey)),
-            String.valueOf(nowMillis),
-            windowMs,   // Injected via @Value (e.g., 30 second window in ms)
-            rateLimit,  // Injected via @Value (e.g., 10 request limit)
-            uniqueMember
-        );
+        Long result;
+        try {
+            // Single atomic execution in 1 round trip!
+            result = redisTemplate.execute(
+                Objects.requireNonNull(rateLimitScript),
+                Objects.requireNonNull(Collections.singletonList(redisKey)),
+                String.valueOf(nowMillis),
+                windowMs,   // Injected via @Value (e.g., 30 second window in ms)
+                rateLimit,  // Injected via @Value (e.g., 10 request limit)
+                uniqueMember
+            );
+        } catch (Exception e) {
+            // REDIS IS DOWN! Log the error immediately, but FAIL OPEN so the system stays online.
+            log.error("CRITICAL: Redis cluster is unreachable! Bypassing rate limiter safety to keep Gateway online.", e);
+            result = 1L; // Pretend Redis returned 1 (Allowed)
+        }
 
         // 3. THE RULE: If they already have 10 requests, block them!
         if (Long.valueOf(0).equals(result)) {

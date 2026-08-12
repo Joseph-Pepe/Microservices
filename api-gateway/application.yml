@@ -35,24 +35,34 @@ spring:
             uri: lb://vector-service 
             predicates:
               - Path=/api/vectors/**
-    # Redis Infrastructure Integration
-    data:
-      redis:
-        host: localhost
-        port: 6379
+            filters:
+              # Automatically adds a custom header to the request before it hits your microservice!
+              # e.g., vector-service needs to know the username (logs who requested the calculation) by extracting it and passing it as a plain HTTP header.
+              - AddRequestHeader=X-Gateway-Validated, true
+  # 3. Redis Infrastructure Integration
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      # Enable connection pooling for Lettuce to match Virtual Thread throughput
+      lettuce:
+        pool:
+          max-active: 64
+          max-idle: 16
+          min-idle: 8
 
-    # Cryptographic Stateless Security (Resource Server Mode)
-    security:
-      oauth2:
-        resourceserver:
-          # Spring automatically fetches the public cryptographic keys from this URI on startup to verify that incoming JWTs were legitimately signed by your Auth Server!
-          jwt:
-            # Simply paste your commercial provider's Issuer URL!
-            # For Auth0 [https://your-tenant.us.auth0.com/]
-            # For Okta  [https://dev-123456.okta.com/oauth2/default]
-            # For AWS   [https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXXXX]
-            # issuer-uri: https://your-auth-server.com/realms/vector-realm
-            # issuer-uri: https://your-tenant.us.auth0.com/ # REPLACE this with your actual Auth0/Okta URL, otherwise the app will crash on startup!
-            
-            # OR if connecting to a local Spring Authorization Server:
-            # jwk-set-uri: http://localhost:9000/oauth2/jwks
+  # Cryptographic Stateless Security (Resource Server Mode)
+  security:
+    oauth2:
+      resourceserver:
+        # Spring automatically fetches the public cryptographic keys from this URI on startup to verify that incoming JWTs were legitimately signed by your Auth Server!
+        jwt:
+          # Simply paste your commercial provider's Issuer URL!
+          # For Auth0 [https://your-tenant.us.auth0.com/]
+          # For Okta  [https://dev-123456.okta.com/oauth2/default]
+          # For AWS   [https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXXXX]
+          # issuer-uri: https://your-auth-server.com/realms/vector-realm
+          # issuer-uri: https://your-tenant.us.auth0.com/ # REPLACE this with your actual Auth0/Okta URL, otherwise the app will crash on startup!
+          
+          # OR if connecting to a local Spring Authorization Server:
+          # jwk-set-uri: http://localhost:9000/oauth2/jwks
