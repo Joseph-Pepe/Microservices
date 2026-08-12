@@ -47,7 +47,7 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 |      Commercial IDaaS Cloud       |     |     Spring Cloud API Gateway MVC (Tomcat)       |       |              Redis Cluster           |
 |  (Auth0 / Okta / AWS Cognito)     |     |                 (Port 8080)                     |       |              (Port 6379)             |
 +-----------------------------------+     +-------------------------------------------------+ <---> +--------------------------------------+
-| • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. OAuth2 Resource Server (Stateless JWT)      |       | • Key: rate_limit:{username=jwt.sub}|
+| • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. OAuth2 Resource Server (Stateless JWT)      |       | • Key: rate_limit:{username=jwt.sub} |
 | • Hosts /.well-known/jwks.json    |     |  2. Global CORS Preflight Configuration         |       | • Data: Sorted Set (ZSET)            |
 +-----------------------------------+     |  3. Distributed Rate Limiter (Atomic Lua Script)|       | • Score: Epoch Millis Timestamp      |
                                           |  4. Client-Side Load Balancer (Round-Robin)     |       | • Eviction: Auto TTL                 |
