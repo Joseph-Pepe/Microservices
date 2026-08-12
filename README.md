@@ -13,7 +13,7 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                                          |
                                          v
 +-------------------------------------------------------------------------------+
-|               SPRING SECURITY MVC (The Perimeter Firewall)                    |
+|                SPRING SECURITY MVC (The Perimeter Firewall)                   |
 +-------------------------------------------------------------------------------+
 |  Rule 1: Path Verification                                                    |
 |          • Is it "/api/vectors/ping"? ──► [PASS PUBLICLY]                     |
@@ -27,6 +27,10 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 |  Rule 3: Context Hydration                                                    |
 |          • Extract "sub" claim (e.g., "admin") and build a standard           |
 |            SecurityContext ThreadLocal Principal.                             |
+|                                                                               |
+|  Rule 4: Downstream Header Injection                                          |
+|          • Append [X-Gateway-Validated: true] to the request headers          |
+|            to prove to downstream microservices that traffic is secure.       |
 +-------------------------------------------------------------------------------+
                                          |
                                          v
