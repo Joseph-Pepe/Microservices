@@ -393,9 +393,9 @@ gcloud run deploy vector-api \
 
 <b>Step 3: Deploy API Gateway to Cloud Run</b>
 
-Once the vector-api deploys, note its generated production HTTPS URL (e.g., https://vector-api-xyz.a.run.app). Update your Gateway's routing configuration. Update your gateway's routing block to point to this address, then deploy the gateway container.
+Once the `vector-api` deploys, note its generated production HTTPS URL (e.g., https://vector-api-xyz.a.run.app). Update your Gateway's routing configuration. Update your gateway's routing block to point to this address, then deploy the gateway container.
 
-This command injects your externalized enterprise configuration rules—including your private GCP MemoryStore (Redis) IP address—directly into the environment variables:
+This command injects your externalized enterprise configuration rules—including your private GCP MemoryStore (Redis) IP address and Lettuce connection pooling optimizations—directly into the environment variables:
 
 ```terminal
 cd api-gateway
@@ -406,6 +406,8 @@ gcloud run deploy api-gateway \
   --allow-unauthenticated \
   --set-env-vars SPRING_DATA_REDIS_HOST=10.X.X.X \
   --set-env-vars SPRING_DATA_REDIS_PORT=6379 \
+  --set-env-vars SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE=64 \
+  --set-env-vars SPRING_DATA_REDIS_LETTUCE_POOL_MAX_IDLE=16 \
   --set-env-vars APP_RATE_LIMIT_WINDOW_MS=30000 \
   --set-env-vars APP_RATE_LIMIT_LIMIT=10 \
   --set-env-vars APP_CORS_ALLOWED_ORIGINS="https://your-frontend-domain.com" \
