@@ -1,6 +1,6 @@
 # Microservice Ecosystem 🚀
 
-An enterprise-grade, horizontally scalable microservice architecture engineered with **Java 21 Virtual Threads**, **Spring Boot 4+**, **Spring Cloud Gateway MVC**, and **PostgreSQL**. 
+An enterprise-grade, horizontally scalable microservice architecture engineered with **Java 21 Virtual Threads**, **Spring Boot 4+**, **Spring Cloud Gateway MVC**, **Redis**, and **PostgreSQL**. 
 
 This system handles real-time computations, protected by stateless **OAuth2 (JWT)** security, an atomic distributed Redis rate limiter, and client-side load balancing. It is fully containerized and cloud-ready for **Google Cloud Platform (GCP)**.
 
@@ -160,7 +160,7 @@ netstat -ano | findstr 5432
 ## ✨ Key Features
 
 ### 1. Java 21 Virtual Threads (api-gateway)
-* Replaces legacy OS thread pools and reactive WebFlux complexity by enabling spring.threads.virtual.enabled=true.
+* Replaces legacy OS thread pools and reactive WebFlux complexity by enabling `spring.threads.virtual.enabled=true`.
 * Achieves massive non-blocking I/O scale using straightforward, synchronous Java MVC code.
 
 ### 2. Stateless OAuth2 Perimeter Firewall
