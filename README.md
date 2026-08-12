@@ -44,7 +44,7 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                                   Obtain Bearer JWT |                            |    Header: Authorization: Bearer <JWT>
                                                     v                            v
 +-----------------------------------+     +-------------------------------------------------+       +--------------------------------------+
-|      Commercial IDaaS Cloud       |     |     Spring Cloud API Gateway MVC (Tomcat)       |       |              Redis Cluster           |
+|      Commercial IDaaS Cloud       |     |      Spring Cloud API Gateway MVC (Tomcat)      |       |              Redis Cluster           |
 |  (Auth0 / Okta / AWS Cognito)     |     |                 (Port 8080)                     |       |              (Port 6379)             |
 +-----------------------------------+     +-------------------------------------------------+ <---> +--------------------------------------+
 | • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. OAuth2 Resource Server (Stateless JWT)      |       | • Key: rate_limit:{username=jwt.sub} |
@@ -67,12 +67,15 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                             |    +----------------------+ +----------------------+ +----------------------+    |   ┌──────────────────────────────────────────────────┐
                             |    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |    |   │         Microservice Internal Layers             │
                             |    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |    |   ├──────────────────────────────────────────────────┤
-                            |    +----------------------+ +----------------------+ +----------------------+    |   │ ├── Controller Layer (Thin HTTP Handlers)        │
-                            |    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |    |   │ ├── Service Layer (Math & Business Logic)        │
-                            |    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |    |   │ ├── Circuit Breaker (Resilience4j Fallbacks)     │
-                            |    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |    |   │ └── Repository Layer (Hibernate ORM Bridge)      │
-                            |    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |    |   └──────────────────────────────────────────────────┘
-                            |    +----------------------+ +----------------------+ +----------------------+    |         
+                            |    +----------------------+ +----------------------+ +----------------------+    |   │ [Filter Layer]                                   │
+                            |    | GatewaySecurityFilter| | GatewaySecurityFilter| | GatewaySecurityFilter|    |   │ └── GatewaySecurityFilter (Bouncer Check)        │
+                            |    |   (Check Header)     | |   (Check Header)     | |   (Check Header)     |    |   │                                                  │
+                            |    +----------------------+ +----------------------+ +----------------------+    |   │ [Application Layers]                             │
+                            |    | [Layer 1] Controller | | [Layer 1] Controller | | [Layer 1] Controller |    |   │ ├── Controller Layer (Thin HTTP Handlers)        │
+                            |    | [Layer 2] Service    | | [Layer 2] Service    | | [Layer 2] Service    |    |   │ ├── Service Layer (Math & Business Logic)        │
+                            |    |   + Circuit Breaker  | |   + Circuit Breaker  | |   + Circuit Breaker  |    |   │ ├── Circuit Breaker (Resilience4j Fallbacks)     │
+                            |    | [Layer 3] Repository | | [Layer 3] Repository | | [Layer 3] Repository |    |   │ └── Repository Layer (Hibernate ORM Bridge)      │
+                            |    +----------------------+ +----------------------+ +----------------------+    |   └──────────────────────────────────────────────────┘
                             |                                                                                  | 
                             +----------------------------------------------------------------------------------+
                                                                    |
