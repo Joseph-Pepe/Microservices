@@ -98,7 +98,7 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 | **Framework** | Spring Boot | Core Spring application engine |
 | **Gateway** | Spring Cloud Gateway MVC | Servlet-based API Router & Load Balancer |
 | **Security** | Spring Security 6 | Stateless OAuth2 perimeter authentication |
-| **Caching/Limits** | Redis | Centralized memory datastore for atomic rate limiting |
+| **Caching/Limits** | Redis | Centralized memory datastore with Lettuce pooling |
 | **Database** | PostgreSQL | Relational persistence engine |
 | **ORM** | Hibernate ORM | Object-Relational Mapping & DDL generation |
 | **Resilience** | Resilience4j | Circuit breakers & fault tolerance |
