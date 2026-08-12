@@ -194,9 +194,7 @@ netstat -ano | findstr 5432
 
 ---
 
-
-
-📡 API Reference & cURL Verification
+## 📡 API Reference & cURL Verification
 
 All client interactions must be directed to the API Gateway on Port 8080. Direct access to backend ports (8081-8083) should be blocked in production environments. Because we are running the gateway in local profile, you can use any string as your Bearer token.
 
@@ -315,8 +313,9 @@ Expected Response (429 Too Many Requests):JSON
   "requestId": "42d6c1d2-5"
 }
 ```
+---
 
-🧪 Automated Testing Suite
+## 🧪 Automated Testing Suite
 
 The system includes an automated integration test harness that spins up an isolated server environment using Spring Boot's @SpringBootTest and WebTestClient.To run the automated security and rate-limiting tests:
 
@@ -330,7 +329,9 @@ Test Cases Covered:
 1. testHackerAttempt_shouldReturn401Unauthorized: Proves that requests missing Bearer tokens are blocked at the perimeter before routing.
 2. testSpammingServer_shouldTriggerRateLimiter429: Executes a rapid loop of 10 valid requests to fill the queue, then asserts that the 11th request is rejected by Redis with HTTP 429 Too Many Requests.
 
-☁️ Google Cloud Platform (GCP) Deployment
+---
+
+## ☁️ Google Cloud Platform (GCP) Deployment
 
 The entire ecosystem is structured for serverless container deployment using Google Cloud Run and Google Cloud SQL, and MemoryStore (Redis).
 
