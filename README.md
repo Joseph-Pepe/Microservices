@@ -44,14 +44,14 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                                   Obtain Bearer JWT |                            |    Header: Authorization: Bearer <JWT>
                                                     v                            v
 +-----------------------------------+     +-------------------------------------------------+       +--------------------------------------+
-|      Commercial IDaaS Cloud       |     |          Spring Cloud API Gateway               |       |              Redis Cluster           |
-|  (Auth0 / Okta / AWS Cognito)     |     |                (Port 8080)                      |       |              (Port 6379)             |
+|      Commercial IDaaS Cloud       |     |     Spring Cloud API Gateway MVC (Tomcat)       |       |              Redis Cluster           |
+|  (Auth0 / Okta / AWS Cognito)     |     |                 (Port 8080)                     |       |              (Port 6379)             |
 +-----------------------------------+     +-------------------------------------------------+ <---> +--------------------------------------+
 | • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. OAuth2 Resource Server (Stateless JWT)      |       | • Key: rate_limit:{username=jwt.sub}|
-| • Hosts /.well-known/jwks.json    |     |  2. JWKS Public Key Cache (Offline Crypto)      |       | • Data: Sorted Set (ZSET)            |
-+-----------------------------------+     |  3. Distributed Rate Limiter (Redis ZSET Engine)|       | • Score: Epoch Millis Timestamp      |
-                                          |  4. Client-Side Load Balancer (Round-Robin)     |       | • Eviction: Auto 30s TTL             |
-                                          |  5. Perimeter Firewall (Spring Security WebFlux)|       +--------------------------------------+
+| • Hosts /.well-known/jwks.json    |     |  2. Global CORS Preflight Configuration         |       | • Data: Sorted Set (ZSET)            |
++-----------------------------------+     |  3. Distributed Rate Limiter (Atomic Lua Script)|       | • Score: Epoch Millis Timestamp      |
+                                          |  4. Client-Side Load Balancer (Round-Robin)     |       | • Eviction: Auto TTL                 |
+                                          |  5. Java 21 Virtual Threads (Non-blocking I/O)  |       +--------------------------------------+
                                           +-------------------------------------------------+       
                                                                    |
                                                           (Round-Robin Routing)
@@ -62,8 +62,8 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                                             |                      |                      |
                                             v                      v                      v
                             +----------------------------------------------------------------------------------+
-                            |                              Microservice Cluster                                |
-                            |                            (Ports 8081, 8082, 8083)                              |
+                            |                            Microservice Cluster                                  |
+                            |                          (Ports 8081, 8082, 8083)                                |
                             |    +----------------------+ +----------------------+ +----------------------+    |   ┌──────────────────────────────────────────────────┐
                             |    |  Vector API Clone 1  | |  Vector API Clone 2  | |  Vector API Clone 3  |    |   │         Microservice Internal Layers             │
                             |    |     (Port 8081)      | |     (Port 8082)      | |     (Port 8083)      |    |   ├──────────────────────────────────────────────────┤
@@ -76,14 +76,14 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                             |                                                                                  | 
                             +----------------------------------------------------------------------------------+
                                                                    |
-                                                 Hibernate ORM / JDBC (Repository Bridge)
+                                                Hibernate ORM / JDBC (Repository Bridge)
                                                                    |                    
                                                +-------------------+-------------------+
                                                |                   |                   |
                                                v                   v                   v
                                            +-------------------------------------------------+
-                                           |             PostgreSQL Database                 |
-                                           |         (Port 5432 / GCP Cloud SQL)             |
+                                           |               PostgreSQL Database               |
+                                           |           (Port 5432 / GCP Cloud SQL)           |
                                            +-------------------------------------------------+
                                            |  • Table: vector_calculations                   |
                                            |  • HikariCP Connection Pools                    |
