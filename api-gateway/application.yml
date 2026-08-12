@@ -6,6 +6,9 @@ app:
   rate-limit:
     window-ms: 30000   # 30 seconds in milliseconds
     limit: 10          # Max 10 requests allowed per window
+  cors:
+    # Comma-separated list of allowed frontend domains
+    allowed-origins: "http://localhost:3000, http://localhost:4200, http://localhost:8000"
 
 spring:
   # Enables Virtual Threads for Tomcat and Async Tasks (automatically gains the asynchronous event loop under the hood)
