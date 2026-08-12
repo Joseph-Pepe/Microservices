@@ -1,87 +1,160 @@
 package com.example.demo.config;
 
-import org.springframework.cloud.gateway.filter.GatewayFilterChain;
-import org.springframework.cloud.gateway.filter.GlobalFilter;
-import org.springframework.core.Ordered;
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
+// 1. SERVLET IMPORTS
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+// 2. STANDARD SPRING IMPORTS
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
-import org.springframework.web.server.ServerWebExchange;
-import org.springframework.web.server.ResponseStatusException;
-import reactor.core.publisher.Mono;
-import java.util.Objects;
+import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.lang.NonNull;
 
-import java.time.Duration;
+// 3. JAVA UTILS
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.io.IOException;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.Objects;
+import java.util.UUID;
 
-// =============================================================
-// APPROACH #3 (BEST): DISTRIBUTED SYSTEMS SPRING CLOUD GATEWAY
-// =============================================================
+// ======================================================================================
+// APPROACH #3 (BEST): DISTRIBUTED SYSTEMS SPRING CLOUD GATEWAY MVC (WITH VIRTUAL THEADS)
+// ======================================================================================
 /* 
     - Distributed memory model using a centralized redis cluster (or database) that all Gateway clones check.
     - Gateway is stateless, if you kill Port 8080 and boot up 8089 it will pick up the user's rate limiting history from Redis.
     - Redis contains a TTL eviction to eliminate any user's rate-limiting record after 30-seconds of inactivity.
     - Vaporizes the key if Redis does not hear from the user again in 30 seconds.
+    - Virtual Threads handles I/O blocking and will automatically yield the CPU during these Redis network calls.
 */
-
 @Component
-public class DistributedRateLimiterFilter implements GlobalFilter, Ordered {
+public class DistributedRateLimiterFilter extends OncePerRequestFilter {
 
-    private final ReactiveStringRedisTemplate redisTemplate;
+    private static final Logger log = LoggerFactory.getLogger(DistributedRateLimiterFilter.class);
+
+    // Inject the STANDARD (blocking) StringRedisTemplate
+    private final StringRedisTemplate redisTemplate;
+    private final RedisScript<Long> rateLimitScript;
+
+    // Inject configs from application.yml with safe fallback defaults if they are missing
+    @Value("${app.rate-limit.window-ms:30000}")
+    private String windowMs;
+
+    @Value("${app.rate-limit.limit:10}")
+    private String rateLimit;
+
+    // Redis Lua Script: Executes atomic cleanup, count, check, insert, and expire in 1 trip per request (~2ms)
+    private static final String RATE_LIMIT_LUA = 
+        "local key = KEYS[1] " +
+        "local now = tonumber(ARGV[1]) " +
+        "local window = tonumber(ARGV[2]) " +
+        "local limit = tonumber(ARGV[3]) " +
+        "local member = ARGV[4] " +
+        "local clearBefore = now - window " +
+        
+        "redis.call('ZREMRANGEBYSCORE', key, 0, clearBefore) " +
+        "local currentRequests = redis.call('ZCARD', key) " +
+        
+        "if currentRequests >= limit then " +
+            "return 0 " + // Rate limit exceeded
+        "end " +
+        
+        "redis.call('ZADD', key, now, member) " +
+        "redis.call('EXPIRE', key, math.ceil(window / 1000)) " +
+        "return 1"
+    ;
 
     // Inject Spring's Reactive Redis Driver
-    public DistributedRateLimiterFilter(ReactiveStringRedisTemplate redisTemplate) {
+    public DistributedRateLimiterFilter(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
+        
+        // Pre-compile the script so Spring uses EVALSHA under the hood
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+
+        // Redis Lua Script: Executes atomic cleanup, count, check, insert, and expire in 1 trip per request (~2ms)
+        script.setScriptText(RATE_LIMIT_LUA);
+        script.setResultType(Long.class);
+        this.rateLimitScript = script;
     }
 
     @Override
-    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        return exchange.getPrincipal().flatMap(principal -> {
-            String username = principal.getName();
-            
-            // Redis Key format: "rate_limit:admin"
-            String redisKey = "rate_limit:" + username;
-            
-            long nowMillis = Instant.now().toEpochMilli();
-            long thirtySecondsAgoMillis = nowMillis - (30 * 1000);
+    protected void doFilterInternal(
+        @NonNull HttpServletRequest request, 
+        @NonNull HttpServletResponse response, 
+        @NonNull FilterChain filterChain) throws ServletException, IOException {
 
-            // We use a Redis Sorted Set (ZSET). 
-            // The "Score" is the timestamp, and the "Value" is a unique string (timestamp + UUID)
-            String uniqueMember = nowMillis + "-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        // Production-ready Asynchronous Logging
+        if (log.isDebugEnabled()) {
+            // Virtual Thread Off: Thread[http-nio-8080-exec-1,5,main], Virtual Thread On: VirtualThread[#45, tomcat-handler-1]/runnable
+            log.debug("Processing request on thread: {}", Thread.currentThread());
+        }
 
-            // 1. Clean up stale timestamps older than 30 seconds (ZREMRANGEBYSCORE)
-            return redisTemplate.opsForZSet()
-                    .removeRangeByScore(redisKey, org.springframework.data.domain.Range.closed(0.0, (double) thirtySecondsAgoMillis))
-                    .then(
-                        // 2. Count how many requests remain in the window (ZCARD) - Constant/Logarithmic Time!
-                        redisTemplate.opsForZSet().size(redisKey)
-                    )
-                    .flatMap(currentRequestCount -> {
-                        // 3. THE RULE: If they already have 10 requests in Redis, block them!
-                        if (currentRequestCount >= 10) {
-                            return Mono.<Void>error(new ResponseStatusException(
-                                    HttpStatus.TOO_MANY_REQUESTS, 
-                                    "Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster."
-                            ));
-                        }
+        // 1. Ensure the user is authenticated before checking rate limits
+        if (request.getUserPrincipal() == null) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
-                        // 4. If allowed, add the new timestamp to the ZSET (ZADD)
-                        return redisTemplate.opsForZSet()
-                                .add(redisKey, uniqueMember, (double) nowMillis)
-                                .then(
-                                    // 5. Reset the key's TTL to 30 seconds (EXPIRE) to prevent memory leaks.
-                                    // If the user logs off, Redis automatically deletes the entire key from RAM!
-                                    redisTemplate.expire(redisKey, java.util.Objects.requireNonNull(Duration.ofSeconds(30)))
-                                )
-                                .then(chain.filter(exchange));
-                    });
+        String username = request.getUserPrincipal().getName();
+        String redisKey = "rate_limit:" + username; // Redis Key format: "rate_limit:admin"
+        long nowMillis = Instant.now().toEpochMilli();
+        // long thirtySecondsAgoMillis = nowMillis - (30 * 1000);
 
-        }).switchIfEmpty(chain.filter(exchange));
-    }
+        // We use a Redis Sorted Set (ZSET). 
+        String uniqueMember = nowMillis + "-" + UUID.randomUUID().toString().substring(0, 8); // The "Score" is the timestamp, and the "Value" is a unique string (timestamp + UUID)
 
-    @Override
-    public int getOrder() {
-        return -1; // Execute at the very front of the Gateway security chain
+        // Single atomic execution in 1 round trip!
+        Long result = redisTemplate.execute(
+            Objects.requireNonNull(rateLimitScript),
+            Objects.requireNonNull(Collections.singletonList(redisKey)),
+            String.valueOf(nowMillis),
+            windowMs,   // Injected via @Value (e.g., 30 second window in ms)
+            rateLimit,  // Injected via @Value (e.g., 10 request limit)
+            uniqueMember
+        );
+
+        // 3. THE RULE: If they already have 10 requests, block them!
+        if (Long.valueOf(0).equals(result)) {
+            log.warn("Rate limit triggered for user: {}! Maximum allowance of {} requests per {}ms exceeded.", username, rateLimit, windowMs);
+            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+            response.getWriter().write("Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster.");
+            return;  // Halt the execution chain immediately
+        }
+
+        // 4. Pass the request down the chain to the actual route
+        filterChain.doFilter(request, response);
+
+
+        // 1. Clean up stale timestamps older than 30 seconds
+        // redisTemplate.opsForZSet().removeRangeByScore(redisKey, 0.0, thirtySecondsAgoMillis);
+
+        // 2. Count how many requests remain in the window
+        // Long currentRequestCount = redisTemplate.opsForZSet().size(redisKey);
+        
+        // 3. THE RULE: If they already have 10 requests, block them!
+        // if (currentRequestCount != null && currentRequestCount >= 10) {
+        //     response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+        //     response.getWriter().write("Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster.");
+        //     return; 
+        // }
+
+        // 4. If allowed, add the new timestamp to the ZSET
+        // redisTemplate.opsForZSet().add(redisKey, uniqueMember, nowMillis);
+
+        // 5. Reset the key's TTL to 30 seconds (EXPIRE) to prevent memory leaks.
+        // If the user logs off, Redis automatically deletes the entire key from RAM!
+        // redisTemplate.expire(redisKey, Duration.ofSeconds(30));
+
+        // 6. Pass the request down the chain to the actual route
+        // filterChain.doFilter(request, response);
     }
 }
 

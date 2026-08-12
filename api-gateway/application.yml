@@ -1,7 +1,18 @@
 server:
   port: 8080
 
+# Custom Enterprise Rate Limit Configurations
+app:
+  rate-limit:
+    window-ms: 30000   # 30 seconds in milliseconds
+    limit: 10          # Max 10 requests allowed per window
+
 spring:
+  # Enables Virtual Threads for Tomcat and Async Tasks (automatically gains the asynchronous event loop under the hood)
+  threads:
+    virtual:
+      enabled: true
+
   cloud:
     # 1. Provide a list of the available Vector API clones
     discovery:
@@ -12,15 +23,33 @@ spring:
               - uri: http://localhost:8081
               - uri: http://localhost:8082
               - uri: http://localhost:8083
+
+    # 2. Tell the Virtual Thread Gateway to use the Load Balancer (lb://) to find a server in the 'vector-service' cluster
     gateway:
-      routes:
-        - id: vector_service_route
-          # 2. Tell the Gateway to use the Load Balancer (lb://) to find a server in the 'vector-service' cluster
-          uri: lb://vector-service 
-          predicates:
-            - Path=/api/vectors/**
-    # Redis 
+      mvc:
+        routes:
+          - id: vector_service_route
+            uri: lb://vector-service 
+            predicates:
+              - Path=/api/vectors/**
+    # Redis Infrastructure Integration
     data:
       redis:
         host: localhost
         port: 6379
+
+    # Cryptographic Stateless Security (Resource Server Mode)
+    security:
+      oauth2:
+        resourceserver:
+          # Spring automatically fetches the public cryptographic keys from this URI on startup to verify that incoming JWTs were legitimately signed by your Auth Server!
+          jwt:
+            # Simply paste your commercial provider's Issuer URL!
+            # For Auth0 [https://your-tenant.us.auth0.com/]
+            # For Okta  [https://dev-123456.okta.com/oauth2/default]
+            # For AWS   [https://cognito-idp.us-east-1.amazonaws.com/us-east-1_XXXXX]
+            # issuer-uri: https://your-auth-server.com/realms/vector-realm
+            # issuer-uri: https://your-tenant.us.auth0.com/ # REPLACE this with your actual Auth0/Okta URL, otherwise the app will crash on startup!
+            
+            # OR if connecting to a local Spring Authorization Server:
+            # jwk-set-uri: http://localhost:9000/oauth2/jwks
