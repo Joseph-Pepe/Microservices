@@ -319,7 +319,7 @@ Expected Response (429 Too Many Requests):JSON
 
 The system includes an automated integration test harness that spins up an isolated server environment using Spring Boot's @SpringBootTest and WebTestClient.To run the automated security and rate-limiting tests:
 
-```
+```terminal
 cd api-gateway
 mvnw clean test
 ```
@@ -333,11 +333,38 @@ Test Cases Covered:
 
 ## ☁️ Google Cloud Platform (GCP) Deployment
 
-The entire ecosystem is structured for serverless container deployment using Google Cloud Run and Google Cloud SQL, and MemoryStore (Redis).
+The entire ecosystem is structured for auto-scaling serverless container deployment using Google Cloud Run, backed by a managed GCP MemoryStore (Redis) instance and Google Cloud SQL (PostgreSQL).
+
+```text
+TRAFFIC INBOUND (Global Users)
+       │
+       ▼
+┌────────────────────────────────────────────────────────┐
+│     Google Cloud Armor (Layer 3/4 DDoS Scrubbing)      │
+└────────────────────────────────────────────────────────┘
+       │ (Filters volumetric infrastructure attacks)
+       ▼
+┌────────────────────────────────────────────────────────┐
+│    Google Global Cloud Load Balancer (Anycast IP)      │
+└────────────────────────────────────────────────────────┘
+       │ (Terminates SSL, routes traffic to nearest region)
+       ▼
+┌────────────────────────────────────────────────────────┐
+│    Cloud Run (Hosts your api-gateway Docker image)     │
+│    ⚡ Powered by Java 21/25 Virtual Threads            │
+└────────────────────────────────────────────────────────┘
+       │                 │
+       │ (Lua Script)    │ (Round-Robin Routing)
+       ▼                 ▼
+┌──────────────┐   ┌─────────────────────────────────────┐
+│ MemoryStore  │   │        Microservice Cluster         │
+│   (Redis)    │   │  (vector-api 1, vector-api 2, etc.) │
+└──────────────┘   └─────────────────────────────────────┘
+```
 
 <b>Step 1: Build the Docker Containers</b>
 
-Both services utilize lightweight Alpine Linux Java runtime containers. Compile production JAR artifacts locally:
+Both services utilize lightweight Alpine Linux Java runtime environments. Compile production, optimized JAR artifacts locally before containerization:
 
 ```
 mvnw clean package -DskipTests
@@ -345,30 +372,40 @@ mvnw clean package -DskipTests
 
 <b>Step 2: Deploy Vector API to Cloud Run (Connected to Cloud SQL)</b>
 
-Use the Google Cloud CLI (gcloud) to build and deploy the backend service, injecting Cloud SQL PostgreSQL socket connection properties dynamically:
+Use the Google Cloud CLI (gcloud) to build and deploy the downstream backend service. This command automatically injects Cloud SQL PostgreSQL socket connection properties into your runtime environment:
 
-```
+```terminal
 cd Web_Application_Spring
+
 gcloud run deploy vector-api \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
   --add-cloudsql-instances YOUR_PROJECT_ID:us-central1:vector-db-instance \
-  --set-env-vars SPRING_DATASOURCE_URL=jdbc:postgresql://google/vector_db?cloudSqlInstance=YOUR_PROJECT_ID:us-central1:vector-db-instance&socketFactory=com.google.cloud.sql.postgres.SocketFactory \
+  --set-env-vars SPRING_DATASOURCE_URL="jdbc:postgresql://google/vector_db?cloudSqlInstance=YOUR_PROJECT_ID:us-central1:vector-db-instance&socketFactory=com.google.cloud.sql.postgres.SocketFactory" \
   --set-env-vars SPRING_DATASOURCE_USERNAME=postgres \
   --set-env-vars SPRING_DATASOURCE_PASSWORD=your_cloud_password
 ```
 
 <b>Step 3: Deploy API Gateway to Cloud Run</b>
 
-Once the vector-api deploys, take its generated cloud HTTPS URL (e.g., https://vector-api-xyz.a.run.app) and update your Gateway's routing configuration. Then deploy the gateway, ensuring it points to the GCP MemoryStore Redis instance:
+Once the vector-api deploys, note its generated production HTTPS URL (e.g., https://vector-api-xyz.a.run.app). Update your Gateway's routing configuration. Update your gateway's routing block to point to this address, then deploy the gateway container.
 
-```
+This command injects your externalized enterprise configuration rules—including your private GCP MemoryStore (Redis) IP address—directly into the environment variables:
+
+```terminal
 cd api-gateway
+
 gcloud run deploy api-gateway \
   --source . \
   --region us-central1 \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --set-env-vars SPRING_DATA_REDIS_HOST=10.X.X.X \
+  --set-env-vars SPRING_DATA_REDIS_PORT=6379 \
+  --set-env-vars APP_RATE_LIMIT_WINDOW_MS=30000 \
+  --set-env-vars APP_RATE_LIMIT_LIMIT=10 \
+  --set-env-vars APP_CORS_ALLOWED_ORIGINS="[https://your-frontend-domain.com](https://your-frontend-domain.com)" \
+  --set-env-vars SPRING_THREADS_VIRTUAL_ENABLED=true
 ```
 
-Microservice Ecosystem is now live, auto-scaling from 0 to thousands of instances globally on Google Cloud!
+Your microservice ecosystem is now fully live, globally optimized, and automatically scaling from 0 to thousands of concurrent instances on Google Cloud!
