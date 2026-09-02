@@ -11,6 +11,9 @@ app:
     allowed-origins: "http://localhost:3000, http://localhost:4200, http://localhost:8000"
 
 spring:
+  application:
+    name: api-gateway
+
   # Enables Virtual Threads for Tomcat and Async Tasks (automatically gains the asynchronous event loop under the hood)
   threads:
     virtual:
@@ -66,3 +69,29 @@ spring:
           
           # OR if connecting to a local Spring Authorization Server:
           # jwk-set-uri: http://localhost:9000/oauth2/jwks
+
+# ==========================================
+# OBSERVABILITY & DISTRIBUTED TRACING
+# ==========================================
+management:
+  tracing:
+    sampling:
+      # Set to 1.0 (100%) for development so every request is tracked.
+      # In production with massive traffic, drop this to 0.1 (10%) or 0.01 (1%).
+      probability: 1.0
+  otlp:
+    tracing:
+      # The standard endpoint for an OpenTelemetry Collector or OTLP-compatible backend (like Zipkin)
+      # Use the exact service name defined in docker-compose.yml
+      endpoint: "http://zipkin:4318/v1/traces"
+
+# ==========================================
+# LOG CORRELATION (MDC)
+# ==========================================
+# Gateway generates a unique traceid.
+# Automatically injects the traceId and spanId into your terminal logs! 
+# Seamlessly passes it downstream to other microservices or Node.js backend via a transparent HTTP header (allows us to track a single request across multiple microservices in a single visual dashboard).
+logging:
+  pattern:
+    # Example output: INFO [api-gateway,65b8c...a3f,2f8d...c1a] Processing request...
+    level: "%5p [%X{traceId:-},%X{spanId:-}]"

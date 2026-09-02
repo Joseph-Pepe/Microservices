@@ -1,0 +1,72 @@
+# Used to orchestrate the Gateway, Redis and Node.js backend.
+# Run "docker-compose up -d --build" to spin up the entire distributed system simultaneously. 
+version: '3.8'
+
+services:
+  # Distributed Tracing Dashboard
+  zipkin:
+    image: openzipkin/zipkin:latest
+    ports:
+      # navigate to "http://localhost:9411" in your browser to see a timeline graph showing exactly how many milliseconds the gateway spent running the redis lua rate limiter, and how long it waited for the microservices and Node.js backend to respond.
+      - "9411:9411" # Zipkin Web UI
+      - "4318:4318" # OTLP HTTP Ingestion Port for Spring Boot
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - lyria-network
+
+  # 1. The Distributed Rate Limiting Database
+  redis-cluster:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    networks:
+      - lyria-network
+
+  # 2. Your Java 21 API Gateway
+  api-gateway:
+    build: 
+      context: ./path-to-java-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis-cluster:6379
+      - SPRING_PROFILES_ACTIVE=prod
+    depends_on:
+      - redis-cluster
+    networks:
+      - lyria-network
+
+  # #3. Database for Node.js backend.
+  postgres-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: lyria
+    ports:
+      - "5432:5432"
+    networks:
+      - lyria-network
+
+  # 4. Your Node.js AI BFF
+  node-backend:
+    build:
+      context: ./path-to-node-backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis-cluster:6379
+      - DATABASE_URL=postgresql://postgres:password@postgres-db:5432/lyria
+    depends_on:
+      - redis-cluster
+      - postgres-db
+    networks:
+      - lyria-network
+
+networks:
+  lyria-network:
+    driver: bridge
