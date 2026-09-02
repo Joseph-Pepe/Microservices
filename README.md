@@ -109,6 +109,7 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 | **Database** | PostgreSQL | Relational persistence engine |
 | **ORM** | Hibernate ORM | Object-Relational Mapping & DDL generation |
 | **Resilience** | Resilience4j | Circuit breakers & fault tolerance |
+| **Observability** | OpenTelemetry & Zipkin | W3C Distributed Tracing & OTLP Metrics |
 | **API Docs** | SpringDoc OpenAPI 3 / Swagger UI | Automated endpoint documentation |
 | **Container** | Docker | Multi-stage lightweight containerization |
 | **Cloud** | Google Cloud Platform (GCP) | Cloud Run (Serverless) + Cloud SQL (Postgres) + MemoryStore |
@@ -119,13 +120,30 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 
 ### Prerequisites
 * **JDK 21+** installed and added to your system `PATH`.
+* **Docker & Docker Compose** installed for cluster orchestration.
 * **Apache Maven** (or use the included `mvnw` wrapper scripts).
 * **PostgreSQL Server** running locally on port `5432` (via Docker or native Windows/macOS installer).
-* **Redis Server** running locally on port `6379`.
+* **Redis Server** can run locally on port `6379`.
+
+# Docker 
+
+<b>Step #1: One-Click Docker Cluster (Recommended)</b>
+
+To boot the entire distributed ecosystem (API Gateway, Node.js Backend, Redis Cluster, PostgreSQL, and Zipkin Tracing) simultaneously using your optimized multi-stage Docker builds:
+
+```terminal
+docker-compose up -d --build
+```
+
+<b>Note:</b> You can view your real-time distributed traces by navigating to the Zipkin dashboard at `http://localhost:9411`.
+
+# Manual local Boot (Alternative)
+
+Ensure PostgreSQL is running on port 5432 and Redis on port 6379 before proceeding.
 
 <b>Step #1: Boot the Microservice Cluster (Load Balancer Setup)</b>
 
-To simulate a horizontally scaled production environment, open three separate terminals inside the vector-service directory and start three clones on different ports:
+To simulate a horizontally scaled production environment manually, open three separate terminals inside the vector-service directory and start three clones on different ports:
 
 <b>`Terminal 1 (Port 8081)`</b>
 
@@ -191,15 +209,28 @@ netstat -ano | findstr 5432
 * Distributes compute load using a **Round-Robin** algorithm, ensuring uniform CPU utilization across all active microservice clones.
 
 ### 6. Circuit Breaker & Fault Tolerance (`Resilience4j`)
+* Gateway Wraps API routes to prevent cascading failures if downstream backend services crash or hang.
+* Implements **Timeouts** (15s limit), **Retries** (for 502/504 network blips), and **Circuit Breaking** (trips if 50% of requests fail).
+* Automatically reroutes failed traffic to a graceful `/fallback` endpoint to return standard JSON 503 errors instead of locking up the gateway OS threads.
 * Wraps critical math operations with @CircuitBreaker (e.g., like vector addition: `@CircuitBreaker(name = "vectorMathService", fallbackMethod = "addVectorsFallback")`) .
 * Automatically trips when backend error thresholds are exceeded, instantly rerouting traffic to a fallback method that returns a safe default (zero-vector `{x:0, y:0, z:0}`) to prevent catastrophic cascading system failures.
 
-### 7. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
+### 7. Observability & Distributed Tracing (`Micrometer` + `OpenTelemetry`)
+* Generates a unique W3C `traceId` at the gateway perimeter and automatically injects it into standard console logs (MDC Log Correlation).
+* Propagates traces transparently via the `traceparent` HTTP header to downstream Node.js/Java microservices.
+* Ships telemetry data via OTLP to **Zipkin** for visual latency timelines, allowing you to debug exactly how many milliseconds the Redis script or Node backend took.
+
+### 8. Enterprise Web Server Tuning
+* **HTTP/2 Enabled:** Massively reduces latency via TCP connection multiplexing.
+* **GZIP Compression:** Intercepts and shrinks large JSON array payloads by ~70-80% over the wire.
+* **Virtual-Thread Socket Optimization:** Tomcat's `max-connections` is increased to `20,000` with a `2,000` connection backlog queue. Because Virtual Threads consume almost zero RAM, the gateway handles C10K scale traffic bursts without memory exhaustion.
+
+### 9. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
 * Uses thin interfaces (`VectorCalculationRepository`) extending `JpaRepository` to eliminate boilerplate JDBC code.
 * Configured with `ddl-auto: update`, allowing Hibernate to dynamically inspect and generate PostgreSQL database tables (`vector_calculations`) at startup.
 * Implements ACID-compliant persistence, saving timestamped vector inputs and calculated magnitudes into a permanent ledger.
 
-### 8. High-Throughput Integration Testing (`WebTestClient`)
+### 10. High-Throughput Integration Testing (`WebTestClient`)
 * Complete automated test suite (`GatewaySecurityAndRateLimitTests.java`) matching the synchronous Servlet architecture.
 * Utilizes `@ActiveProfiles("local")` and custom timeout mutations to verify edge-case security failures and rate-limiter exhaustion.
 
