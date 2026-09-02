@@ -125,9 +125,9 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 * **PostgreSQL Server** running locally on port `5432` (via Docker or native Windows/macOS installer).
 * **Redis Server** can run locally on port `6379`.
 
-# Docker 
+## Docker (Recommended)
 
-<b>Step #1: One-Click Docker Cluster (Recommended)</b>
+<b>Step #1: One-Click Docker Cluster</b>
 
 To boot the entire distributed ecosystem (API Gateway, Node.js Backend, Redis Cluster, PostgreSQL, and Zipkin Tracing) simultaneously using your optimized multi-stage Docker builds:
 
@@ -137,7 +137,7 @@ docker-compose up -d --build
 
 <b>Note:</b> You can view your real-time distributed traces by navigating to the Zipkin dashboard at `http://localhost:9411`.
 
-# Manual local Boot (Alternative)
+## Manual local Boot (Alternative)
 
 Ensure PostgreSQL is running on port 5432 and Redis on port 6379 before proceeding.
 
