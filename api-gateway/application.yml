@@ -1,6 +1,29 @@
 server:
   port: 8080
 
+  # 1. HTTP/2 Support (Massively reduces latency via connection multiplexing)
+  http2:
+    enabled: true
+
+  # 2. GZIP Payload Compression (Shrinks large JSON arrays by ~70-80%)
+  compression:
+    enabled: true
+    min-response-size: 1024 # Only compress payloads larger than 1KB to save CPU
+    mime-types: application/json,application/xml,text/plain,text/css,application/javascript
+
+  # 3. Tomcat Socket & Connection Tuning (Optimized for Virtual Threads)
+  tomcat:
+    # Max simultaneous TCP connections Tomcat will hold open. 
+    # Because Virtual Threads use almost zero RAM, we can safely bump this from the default (8192) to 20000.
+    max-connections: 20000
+    
+    # The OS-level TCP backlog queue. If 20,000 users are connected, and 2,000 more try to connect 
+    # at the exact same millisecond, they wait in this queue instead of getting "Connection Refused".
+    accept-count: 2000
+    
+    # Keep idle connections open for 60 seconds to prevent constant TLS handshake overhead.
+    keep-alive-timeout: 60000
+
 # Custom Enterprise Rate Limit Configurations
 app:
   rate-limit:
@@ -42,6 +65,11 @@ spring:
               # Automatically adds a custom header to the request before it hits your microservice!
               # e.g., vector-service needs to know the username (logs who requested the calculation) by extracting it and passing it as a plain HTTP header.
               - AddRequestHeader=X-Gateway-Validated, true
+              # RULE #1: [RETRY] Try 2 total times for transient network errors (502, 504), try again one more time before giving up b/c it probably was a network blip.
+              - Retry=2,502 BAD_GATEWAY,504 GATEWAY_TIMEOUT
+              # RULE #2: [CIRCUIT BREAKER] If backend is dead, route traffic to our local /fallback endpoint (i.e., if the backend fails 50% of the time, open the circuit and return a friendly fallback message instead of making the user wait for a timeout).
+              - CircuitBreaker=vectorCircuitBreaker,forward:/fallback
+
   # 3. Redis Infrastructure Integration
   data:
     redis:
@@ -70,6 +98,29 @@ spring:
           # OR if connecting to a local Spring Authorization Server:
           # jwk-set-uri: http://localhost:9000/oauth2/jwks
 
+# ==========================================
+# RESILIENCE4J CIRCUIT BREAKER CONFIG
+# ==========================================
+# RULE #3: [TIMEOUT] if the backend takes longer than 15 seconds, kill the connection.
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        # How many requests to evaluate before making a decision
+        slidingWindowSize: 10
+        # If 50% of the last 10 requests fail or timeout, open the circuit!
+        failureRateThreshold: 50
+        # Wait 20 seconds before "half-opening" to see if the backend recovered
+        waitDurationInOpenState: 20s
+        # Allow requests to take up to 15 seconds (Generative AI takes time)
+        slowCallDurationThreshold: 15s
+        slowCallRateThreshold: 50
+  timelimiter:
+    configs:
+      default:
+        # Hard kill any proxy connection that takes longer than 16 seconds
+        timeoutDuration: 16s 
+        
 # ==========================================
 # OBSERVABILITY & DISTRIBUTED TRACING
 # ==========================================
