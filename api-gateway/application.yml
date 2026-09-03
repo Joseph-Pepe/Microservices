@@ -1,5 +1,6 @@
 server:
-  port: 8080
+  # ${ENVIRONMENT_VARIABLE_NAME:default_value} injects parameterized environment variable with a fallback to port 8080 (i.e., dynamic port binding).
+  port: ${PORT:8080}
 
   # 1. HTTP/2 Support (Massively reduces latency via connection multiplexing)
   http2:
@@ -58,7 +59,7 @@ spring:
       mvc:
         routes:
           - id: vector_service_route
-            uri: lb://vector-service 
+            uri: ${BACKEND_SERVICE_URL:lb://vector-service} # Allows pointing directly to a cloud URL
             predicates:
               - Path=/api/vectors/**
             filters:
@@ -73,8 +74,8 @@ spring:
   # 3. Redis Infrastructure Integration
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
       # Enable connection pooling for Lettuce to match Virtual Thread throughput
       lettuce:
         pool:
@@ -125,6 +126,14 @@ resilience4j:
 # OBSERVABILITY & DISTRIBUTED TRACING
 # ==========================================
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true # Tells the cloud if the app is booting vs fully ready to take traffic
+  endpoints:
+    web:
+      exposure:
+        include: "health,prometheus" # Expose the health endpoint
   tracing:
     sampling:
       # Set to 1.0 (100%) for development so every request is tracked.
@@ -134,7 +143,7 @@ management:
     tracing:
       # The standard endpoint for an OpenTelemetry Collector or OTLP-compatible backend (like Zipkin)
       # Use the exact service name defined in docker-compose.yml
-      endpoint: "http://zipkin:4318/v1/traces"
+      endpoint: ${ZIPKIN_URL:http://zipkin:4318/v1/traces}
 
 # ==========================================
 # LOG CORRELATION (MDC)

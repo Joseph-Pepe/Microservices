@@ -220,17 +220,21 @@ netstat -ano | findstr 5432
 * Propagates traces transparently via the `traceparent` HTTP header to downstream Node.js/Java microservices.
 * Ships telemetry data via OTLP to **Zipkin** for visual latency timelines, allowing you to debug exactly how many milliseconds the Redis script or Node backend took.
 
-### 8. Enterprise Web Server Tuning
+### 8. Cloud-Native Health Probes (Actuator)
+* Exposes an unauthenticated `/actuator/health` endpoint through the Spring Security firewall.
+* Allows AWS ALB, GCP Load Balancers, and Kubernetes liveness/readiness probes to verify container health, preventing traffic routing to frozen instances.
+
+### 9. Enterprise Web Server Tuning
 * **HTTP/2 Enabled:** Massively reduces latency via TCP connection multiplexing.
 * **GZIP Compression:** Intercepts and shrinks large JSON array payloads by ~70-80% over the wire.
 * **Virtual-Thread Socket Optimization:** Tomcat's `max-connections` is increased to `20,000` with a `2,000` connection backlog queue. Because Virtual Threads consume almost zero RAM, the gateway handles C10K scale traffic bursts without memory exhaustion.
 
-### 9. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
+### 10. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
 * Uses thin interfaces (`VectorCalculationRepository`) extending `JpaRepository` to eliminate boilerplate JDBC code.
 * Configured with `ddl-auto: update`, allowing Hibernate to dynamically inspect and generate PostgreSQL database tables (`vector_calculations`) at startup.
 * Implements ACID-compliant persistence, saving timestamped vector inputs and calculated magnitudes into a permanent ledger.
 
-### 10. High-Throughput Integration Testing (`WebTestClient`)
+### 11. High-Throughput Integration Testing (`WebTestClient`)
 * Complete automated test suite (`GatewaySecurityAndRateLimitTests.java`) matching the synchronous Servlet architecture.
 * Utilizes `@ActiveProfiles("local")` and custom timeout mutations to verify edge-case security failures and rate-limiter exhaustion.
 
@@ -442,14 +446,18 @@ gcloud run deploy api-gateway \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars SPRING_DATA_REDIS_HOST=10.X.X.X \
-  --set-env-vars SPRING_DATA_REDIS_PORT=6379 \
+  --set-env-vars REDIS_HOST=10.X.X.X \
+  --set-env-vars REDIS_PORT=6379 \
+  --set-env-vars BACKEND_SERVICE_URL=https://vector-api-xyz.a.run.app \
+  --set-env-vars ZIPKIN_URL=https://your-zipkin-server/v1/traces \
   --set-env-vars SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE=64 \
   --set-env-vars SPRING_DATA_REDIS_LETTUCE_POOL_MAX_IDLE=16 \
   --set-env-vars APP_RATE_LIMIT_WINDOW_MS=30000 \
   --set-env-vars APP_RATE_LIMIT_LIMIT=10 \
   --set-env-vars APP_CORS_ALLOWED_ORIGINS="https://your-frontend-domain.com" \
   --set-env-vars SPRING_THREADS_VIRTUAL_ENABLED=true
+
+*(Note: Google Cloud Run automatically injects the `$PORT` environment variable, which the API Gateway dynamic configuration natively binds to.)*
 ```
 
 Your microservice ecosystem is now fully live, globally optimized, and automatically scaling from 0 to thousands of concurrent instances on Google Cloud!

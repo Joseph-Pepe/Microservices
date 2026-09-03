@@ -41,7 +41,7 @@ public class SecurityConfig {
                 // Let the browser's OPTIONS preflight checks pass through unauthenticated
                 .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.FORWARD, jakarta.servlet.DispatcherType.ERROR).permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
-
+                .requestMatchers("/actuator/health/**").permitAll() // Let the Cloud Load Balancer check if the app is alive!
                 .requestMatchers("/api/vectors/ping").permitAll() // Let anyone ping the server to see if it's alive
                 .requestMatchers("/api/vectors/**").authenticated() // Require valid JWT for math operations
                 .anyRequest().denyAll() // Block anything else we haven't explicitly thought of
