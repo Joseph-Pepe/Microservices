@@ -114,6 +114,21 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 | **Container** | Docker | Multi-stage lightweight containerization |
 | **Cloud** | Google Cloud Platform (GCP) | Cloud Run (Serverless) + Cloud SQL (Postgres) + MemoryStore |
 
+--- 
+
+## ⚙️ Environment Variables
+
+The API Gateway is built following the **Twelve-Factor App** methodology. It requires zero code changes to move between environments; simply inject the following environment variables:
+
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `PORT` | `8080` | Dynamic port binding (Required for Cloud Run / App Runner). |
+| `REDIS_HOST` | `localhost` | The IP or DNS of your Redis cluster. |
+| `REDIS_PORT` | `6379` | The port for your Redis cluster. |
+| `BACKEND_SERVICE_URL` | `lb://vector-service` | The downstream routing URL. In production, change this to your cloud backend (e.g., `https://api.internal`). |
+| `ZIPKIN_URL` | `http://zipkin:4318/v1/traces` | The OTLP ingestion endpoint for Distributed Tracing. |
+| `SPRING_PROFILES_ACTIVE`| `default` | Set to `local` to bypass Auth0/Okta JWT signature verification during local testing. |
+
 ---
 
 ## 🚀 Local Development Setup
@@ -377,9 +392,37 @@ Test Cases Covered:
 
 ---
 
+## 🌩️ Extreme Load Testing (C10K Verification)
+
+Because this Gateway utilizes **Java 21 Virtual Threads** and Tomcat socket tuning (`max-connections: 20000`), it can handle massive concurrent spikes without crashing.
+
+You can verify this locally using a modern HTTP load generation tool.
+
+**1. Test Tomcat's Virtual Thread Capacity**
+Flood the unauthenticated health endpoint with 5,000 concurrent workers for 15 seconds to watch Tomcat absorb the traffic without running out of OS threads:
+
+```bash
+hey -z 15s -c 5000 http://localhost:8080/actuator/health
+```
+
+**2. Test the Redis Distributed Rate Limiter**
+
+Send a massive burst of authenticated traffic to a protected route. You will see the first 10 requests succeed (HTTP 200), and the remaining thousands instantly rejected by the atomic Redis Lua script (HTTP 429), perfectly shielding your backend instances:
+
+```bash
+hey -n 1000 -c 100 -m GET -H "Authorization: Bearer mock-test-token" http://localhost:8080/api/vectors/ping
+```
+
+
+---
+
 ## ☁️ Google Cloud Platform (GCP) Deployment
 
 The entire ecosystem is structured for auto-scaling serverless container deployment using Google Cloud Run, backed by a managed GCP MemoryStore (Redis) instance and Google Cloud SQL (PostgreSQL).
+
+```markdown
+> **☁️ Cloud Agnostic Design:** While the deployment guide below features Google Cloud, this ecosystem relies strictly on standard Docker containers and injected environment variables. It can be deployed identically to **AWS** (App Runner, ECS Fargate, ElastiCache) or **Microsoft Azure** (Container Apps, Azure Cache for Redis) without modifying a single line of Java code.
+```
 
 ```text
 TRAFFIC INBOUND (Global Users)
