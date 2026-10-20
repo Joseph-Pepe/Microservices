@@ -32,10 +32,17 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - REDIS_URL=redis://redis-cluster:6379
-      - SPRING_PROFILES_ACTIVE=prod
+      # Match the exact placeholders in application.yml
+      # REDIS_URL=redis://redis-cluster:6379
+      - REDIS_HOST=redis-cluster
+      - REDIS_PORT=6379
+      - ZIPKIN_URL=http://zipkin:4318/v1/traces
+      - BACKEND_SERVICE_URL=http://node-backend:8000
+      # Use 'local' when testing without a live Auth0/Okta URL, or provide JWT_ISSUER_URI for 'prod'
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local} # SPRING_PROFILES_ACTIVE=prod
     depends_on:
       - redis-cluster
+      - zipkin
     networks:
       - lyria-network
 

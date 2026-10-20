@@ -1,12 +1,16 @@
 package com.example.demo; 
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.reactive.server.WebTestClient;
+
 import java.time.Duration;
+import java.util.stream.IntStream;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("local") // 1. CRITICAL: This boots your local profile to enable your mock JwtDecoder!
@@ -15,37 +19,46 @@ class GatewaySecurityAndRateLimitTests {
     @Autowired
     private WebTestClient webClient; 
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    @BeforeEach
+    void resetRedisRateLimitBucket() {
+        // Ensure every test run starts with a clean slate in Redis
+        redisTemplate.delete("rate_limit:local-admin-tester");
+    }
+
     @Test
     void testHackerAttempt_shouldReturn401Unauthorized() {
         // No Authorization header sent -> should block instantly
         webClient.post().uri("/api/vectors/calculateMagnitude")
-                .exchange() 
-                .expectStatus().isUnauthorized(); 
+                .exchange()
+                .expectStatus().isUnauthorized();
     }
 
     @Test
     void testSpammingServer_shouldTriggerRateLimiter429() {
-        WebTestClient patientClient = webClient.mutate()
-                .responseTimeout(java.util.Objects.requireNonNull(Duration.ofSeconds(10)))
+        var patientClient = webClient.mutate()
+                .responseTimeout(Duration.ofSeconds(10))
                 .build();
 
-        // 2. We use a loop to rapidly fire 10 valid requests.
-        // We use bearer tokens now instead of old basic auth headers!
-        for (int i = 0; i < 10; i++) {
+        // 2. Rapidly fire 10 valid requests WITH bearer tokens!
+        // Fire 10 valid requests using modern Java IntStream
+        IntStream.range(0, 10).forEach(i ->
             patientClient.post().uri("/api/vectors/calculateMagnitude")
                     .headers(headers -> headers.setBearerAuth("mock-test-token-string")) // Triggers mock decoder!
-                    .exchange(); 
-        }
+                    .exchange()
+        );
 
-        // 3. The Trap: Fire the 11th request instantly.
+        // 3. An 11th request must be blocked by the atomic Redis Lua script.
         // The Lua script has 10 entries for "local-admin-tester" in Redis, so it will block this one.
         patientClient.post().uri("/api/vectors/calculateMagnitude")
                 .headers(headers -> headers.setBearerAuth("mock-test-token-string"))
-                .exchange() 
+                .exchange()
                 .expectStatus().isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
                 .expectBody(String.class)
                 // Match the exact plain-text error message written by your response.getWriter().write()
-                .isEqualTo("Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster."); 
+                .isEqualTo("Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster.");
     }
 }
 

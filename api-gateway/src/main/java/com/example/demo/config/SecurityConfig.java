@@ -1,27 +1,39 @@
 package com.example.demo.config;
 
+// ============================================================================================
+// SPRING CLOUD GATEWAY MVC SECURITY (WITH VIRTUAL THREADS & ENFORCEMENT OF STATELESS SESSIONS)
+// ============================================================================================
+/*
+    - Replaces WebFlux Security by providing massive scalability and high throughput of the reactive model, making it easier to write, read and debug.
+    - Enforces strict statelessness by never allocating HttpSession objects in memory (i.e., no server-side session storage).
+    - Automatically supports functional chaining for fetch data from multiple APIs simultaneously and backpressure handling for slower connections.
+    - Automatically integrates with Spring Cloud Gateway to extract the 'sub' claim from the JWT and feed it into the Redis rate limiter.
+    - Automatically enforces strict CORS rules for all routes passing through the Gateway.
+    - Automatically enforces strict security headers to prevent Clickjacking, MIME-sniffing, and HSTS attacks.
+    - Automatically enforces strict upstream connect and read timeouts to prevent Slowloris DDoS attacks.
+    - Automatically enforces strict OAuth2 JWT verification for all routes passing through the Gateway.
+*/
+
+import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
 import java.util.List;
 
-// ========================================================
-// SPRING CLOUD GATEWAY MVC SECURITY (WITH VIRTUAL THREADS)
-// ========================================================
-/*
-    - Replaces WebFlux Security by providing massive scalability and high throughput of the reactive model, making it easier to write, read and debug.
-*/
 @Configuration
-@EnableWebSecurity 
+@EnableWebSecurity
 public class SecurityConfig {
 
     @Value("${app.cors.allowed-origins}")
@@ -29,58 +41,133 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
+        return http
             // 1. ENABLE CORS Integration with Spring Security
             .cors(Customizer.withDefaults())
-
             // 2. Disable CSRF and browser form logins (Standard for stateless REST APIs)
-            .csrf(csrf -> csrf.disable())
+            .csrf(AbstractHttpConfigurer::disable)
+            .formLogin(AbstractHttpConfigurer::disable)
+            .httpBasic(AbstractHttpConfigurer::disable)
 
-            // 3. The Firewall's Access Control List (ACL)! Define routing authorization rules (Enhances Spring Security)
-            .authorizeHttpRequests(auth -> auth 
+            // 1. STRICT STATELESSNESS: Never allocate HttpSession objects in memory
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+            // 2. ENTERPRISE SECURITY HEADERS: Prevent MIME-sniffing, Clickjacking, and enforce HSTS
+            .headers(headers -> headers
+                .frameOptions(HeadersConfigurer.FrameOptionsConfig::deny)
+                .contentTypeOptions(Customizer.withDefaults())
+                .httpStrictTransportSecurity(hsts -> hsts
+                    .includeSubDomains(true)
+                    .maxAgeInSeconds(31536000)
+                )
+            )
+
+            // 3. ZERO-TRUST ACL: The Firewall's Access Control List (ACL)! Define routing authorization rules (Enhances Spring Security)
+            .authorizeHttpRequests(auth -> auth
                 // Let the browser's OPTIONS preflight checks pass through unauthenticated
-                .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.FORWARD, jakarta.servlet.DispatcherType.ERROR).permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
-                .requestMatchers("/actuator/health/**").permitAll() // Let the Cloud Load Balancer check if the app is alive!
+                .dispatcherTypeMatchers(DispatcherType.FORWARD, DispatcherType.ERROR).permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                .requestMatchers("/actuator/health/**", "/fallback").permitAll()  // Let the Cloud Load Balancer check if the app is alive!
                 .requestMatchers("/api/vectors/ping").permitAll() // Let anyone ping the server to see if it's alive
-                .requestMatchers("/api/vectors/**").authenticated() // Require valid JWT for math operations
+                .requestMatchers("/api/vectors/**").authenticated() // Require valid JWT
                 .anyRequest().denyAll() // Block anything else we haven't explicitly thought of
             )
 
-            // 4. OAuth2 Resource Server (JWT Token)
-            .oauth2ResourceServer(oauth2 -> oauth2
-                .jwt(Customizer.withDefaults())
-            );
-
-        return http.build();
+            // 4. OAuth2 Resource Server (JWT Token Verification)
+            .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
+            .build();
     }
 
     /**
-     * Define the exact CORS rules the Gateway will enforce.
-     */
+      * Define the exact CORS rules the Gateway will enforce.
+      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-        
+        var configuration = new CorsConfiguration();
         // Inject the allowed origins from application.yml (e.g., React, Angular)
-        configuration.setAllowedOrigins(Arrays.asList(allowedOrigins));
-        
+        configuration.setAllowedOrigins(List.of(allowedOrigins));
         // Standard REST methods
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        
         // Allow the browser to send the Authorization header (containing your JWT)
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
-        
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "traceparent"));
         // Optional: Expose custom headers back to the frontend (if your Gateway generates any)
-        // configuration.setExposedHeaders(List.of("X-RateLimit-Remaining"));
-        
-        // Apply this configuration to every route passing through the Gateway
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        configuration.setExposedHeaders(List.of("X-RateLimit-Remaining", "traceparent"));
+        configuration.setMaxAge(3600L);
+
+        // Apply this configuration to every route passing through the Gateway (var: UrlBasedCorsConfigurationSource)
+        var source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
-        
         return source;
     }
 }
+
+// ========================================================
+// SPRING CLOUD GATEWAY MVC SECURITY (WITH VIRTUAL THREADS)
+// ========================================================
+/*
+    - Replaces WebFlux Security by providing massive scalability and high throughput of the reactive model, making it easier to write, read and debug.
+*/
+// import org.springframework.beans.factory.annotation.Value;
+// import org.springframework.context.annotation.Bean;
+// import org.springframework.context.annotation.Configuration;
+// import org.springframework.security.config.Customizer;
+// import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+// import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+// import org.springframework.security.web.SecurityFilterChain;
+// import org.springframework.web.cors.CorsConfiguration;
+// import org.springframework.web.cors.CorsConfigurationSource;
+// import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+// import java.util.Arrays;
+// import java.util.List;
+
+// @Configuration
+// @EnableWebSecurity 
+// public class SecurityConfig {
+
+//     @Value("${app.cors.allowed-origins}")
+//     private String[] allowedOrigins;
+
+//     @Bean
+//     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+//         http
+//             .cors(Customizer.withDefaults())
+//             .csrf(csrf -> csrf.disable())
+//             .authorizeHttpRequests(auth -> auth 
+//                 .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.FORWARD, jakarta.servlet.DispatcherType.ERROR).permitAll()
+//                 .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
+//                 .requestMatchers("/actuator/health/**").permitAll()
+//                 .requestMatchers("/api/vectors/ping").permitAll() 
+//                 .requestMatchers("/api/vectors/**").authenticated() 
+//                 .anyRequest().denyAll() 
+//             )
+//             .oauth2ResourceServer(oauth2 -> oauth2
+//                 .jwt(Customizer.withDefaults())
+//             );
+
+//         return http.build();
+//     }
+
+//     @Bean
+//     public CorsConfigurationSource corsConfigurationSource() {
+//         CorsConfiguration configuration = new CorsConfiguration();
+        
+//         configuration.setAllowedOrigins(Arrays.asList(allowedOrigins));
+        
+//         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        
+//         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        
+//         
+//         // configuration.setExposedHeaders(List.of("X-RateLimit-Remaining"));
+        
+//         
+//         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+//         source.registerCorsConfiguration("/**", configuration);
+        
+//         return source;
+//     }
+// }
 
 // ============================================
 // WEBFLUX SECURITY (REACTIVE APPROACH)

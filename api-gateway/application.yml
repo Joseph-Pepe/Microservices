@@ -2,17 +2,22 @@ server:
   # ${ENVIRONMENT_VARIABLE_NAME:default_value} injects parameterized environment variable with a fallback to port 8080 (i.e., dynamic port binding).
   port: ${PORT:8080}
 
-  # 1. HTTP/2 Support (Massively reduces latency via connection multiplexing)
+  # 1. CRITICAL FOR AWS/GCP/AZURE: Trust X-Forwarded-For & X-Forwarded-Proto from Cloud Load Balancers
+  forward-headers-strategy: framework
+  # 2. ZERO-DOWNTIME DEPLOYMENTS: Wait for active Virtual Threads to finish before stopping container
+  shutdown: graceful
+
+  # 3. HTTP/2 Support (Massively reduces latency via connection multiplexing)
   http2:
     enabled: true
 
-  # 2. GZIP Payload Compression (Shrinks large JSON arrays by ~70-80%)
+  # 4. GZIP Payload Compression (Shrinks large JSON arrays by ~70-80%)
   compression:
     enabled: true
     min-response-size: 1024 # Only compress payloads larger than 1KB to save CPU
     mime-types: application/json,application/xml,text/plain,text/css,application/javascript
 
-  # 3. Tomcat Socket & Connection Tuning (Optimized for Virtual Threads)
+  # 5. Tomcat Socket & Connection Tuning (Optimized for Virtual Threads)
   tomcat:
     # Max simultaneous TCP connections Tomcat will hold open. 
     # Because Virtual Threads use almost zero RAM, we can safely bump this from the default (8192) to 20000.
@@ -24,6 +29,7 @@ server:
     
     # Keep idle connections open for 60 seconds to prevent constant TLS handshake overhead.
     keep-alive-timeout: 60000
+    connection-timeout: 5000 # Drop dead TCP sockets after 5 seconds to prevent Slowloris DDoS attacks
 
 # Custom Enterprise Rate Limit Configurations
 app:
@@ -57,12 +63,18 @@ spring:
     # 2. Tell the Virtual Thread Gateway to use the Load Balancer (lb://) to find a server in the 'vector-service' cluster
     gateway:
       mvc:
+        # Enforce strict upstream connect and read timeouts
+        http-client:
+          connect-timeout: 3000
+          read-timeout: 15000
         routes:
           - id: vector_service_route
             uri: ${BACKEND_SERVICE_URL:lb://vector-service} # Allows pointing directly to a cloud URL
             predicates:
               - Path=/api/vectors/**
             filters:
+              # ZERO-TRUST: Strip any spoofed validation headers sent by external attackers first!
+              - RemoveRequestHeader=X-Gateway-Validated
               # Automatically adds a custom header to the request before it hits your microservice!
               # e.g., vector-service needs to know the username (logs who requested the calculation) by extracting it and passing it as a plain HTTP header.
               - AddRequestHeader=X-Gateway-Validated, true
@@ -89,6 +101,9 @@ spring:
       resourceserver:
         # Spring automatically fetches the public cryptographic keys from this URI on startup to verify that incoming JWTs were legitimately signed by your Auth Server!
         jwt:
+          # Parameterized for instant deployment to Auth0, Okta, AWS Cognito, GCP, or Azure Entra ID
+          issuer-uri: ${JWT_ISSUER_URI:https://your-tenant.us.auth0.com/}
+          
           # Simply paste your commercial provider's Issuer URL!
           # For Auth0 [https://your-tenant.us.auth0.com/]
           # For Okta  [https://dev-123456.okta.com/oauth2/default]
