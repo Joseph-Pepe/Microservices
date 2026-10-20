@@ -56,6 +56,9 @@ class GatewaySecurityAndRateLimitTests {
                 .headers(headers -> headers.setBearerAuth("mock-test-token-string"))
                 .exchange()
                 .expectStatus().isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
+                .expectHeader().valueEquals("X-RateLimit-Limit", "10")
+                .expectHeader().valueEquals("X-RateLimit-Remaining", "0")
+                .expectHeader().valueEquals("Retry-After", "30")
                 .expectBody(String.class)
                 // Match the exact plain-text error message written by your response.getWriter().write()
                 .isEqualTo("Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster.");

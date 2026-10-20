@@ -28,9 +28,10 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 |          • Extract "sub" claim (e.g., "admin") and build a standard           |
 |            SecurityContext ThreadLocal Principal.                             |
 |                                                                               |
-|  Rule 4: Downstream Header Injection                                          |
-|          • Append [X-Gateway-Validated: true] to the request headers          |
-|            to prove to downstream microservices that traffic is secure.       |
+|  Rule 4: Zero-Trust Header Sanitization & Injection                           |
+|          • Strip any spoofed incoming [X-Gateway-Validated] headers first!    |
+|          • Append fresh [X-Gateway-Validated: true] to prove to downstream    |
+|            microservices that traffic was authenticated at the perimeter.     |
 +-------------------------------------------------------------------------------+
                                          |
                                          v
@@ -101,18 +102,18 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 
 | Component | Technology | Description |
 | :--- | :--- | :--- |
-| **Runtime** | Java 21 LTS | JDK 21 utilizing Project Loom (Virtual Threads) |
-| **Framework** | Spring Boot | Core Spring application engine |
-| **Gateway** | Spring Cloud Gateway MVC | Servlet-based API Router & Load Balancer |
-| **Security** | Spring Security 6 | Stateless OAuth2 perimeter authentication |
-| **Caching/Limits** | Redis | Centralized memory datastore with Lettuce pooling |
-| **Database** | PostgreSQL | Relational persistence engine |
+| **Runtime** | Java 21 LTS | JDK 21 with Virtual Threads, Generational ZGC & AppCDS |
+| **Framework** | Spring Boot 3.2+ | Core Spring application engine with RFC 9457 ProblemDetails |
+| **Gateway** | Spring Cloud Gateway MVC | Servlet-based API Router & Client-Side Load Balancer |
+| **Security** | Spring Security 6 | Stateless OAuth2 JWT Firewall + HSTS / Anti-Spoofing |
+| **Caching/Limits** | Redis 7 | Atomic Lua rate limiting with Lettuce connection pooling |
+| **Database** | PostgreSQL 15 | Relational persistence engine |
 | **ORM** | Hibernate ORM | Object-Relational Mapping & DDL generation |
-| **Resilience** | Resilience4j | Circuit breakers & fault tolerance |
-| **Observability** | OpenTelemetry & Zipkin | W3C Distributed Tracing & OTLP Metrics |
+| **Resilience** | Resilience4j | Circuit breakers, upstream timeouts & retry safety nets |
+| **Observability** | OpenTelemetry & Zipkin | W3C Distributed Tracing (`traceparent`) & OTLP Metrics |
 | **API Docs** | SpringDoc OpenAPI 3 / Swagger UI | Automated endpoint documentation |
-| **Container** | Docker | Multi-stage lightweight containerization |
-| **Cloud** | Google Cloud Platform (GCP) | Cloud Run (Serverless) + Cloud SQL (Postgres) + MemoryStore |
+| **Container** | Docker (Multi-Stage) | Non-root Alpine JRE with Layered JARs & AppCDS pre-warming |
+| **Cloud** | AWS / GCP / Azure | 100% Cloud-Agnostic (Cloud Run, AWS ECS/Fargate, Azure ACA) |
 
 --- 
 
@@ -126,8 +127,9 @@ The API Gateway is built following the **Twelve-Factor App** methodology. It req
 | `REDIS_HOST` | `localhost` | The IP or DNS of your Redis cluster. |
 | `REDIS_PORT` | `6379` | The port for your Redis cluster. |
 | `BACKEND_SERVICE_URL` | `lb://vector-service` | The downstream routing URL. In production, change this to your cloud backend (e.g., `https://api.internal`). |
+| `JWT_ISSUER_URI` | `https://your-tenant.us.auth0.com/` | Your OIDC/OAuth2 provider URL (Auth0, Okta, AWS Cognito, Azure Entra ID). |
 | `ZIPKIN_URL` | `http://zipkin:4318/v1/traces` | The OTLP ingestion endpoint for Distributed Tracing. |
-| `SPRING_PROFILES_ACTIVE`| `default` | Set to `local` to bypass Auth0/Okta JWT signature verification during local testing. |
+| `SPRING_PROFILES_ACTIVE`| `local` | Set to `local` or `test` for mock JWT decoding; set to `prod` in live deployments. |
 
 ---
 
@@ -203,46 +205,45 @@ netstat -ano | findstr 5432
 * Replaces legacy OS thread pools and reactive WebFlux complexity by enabling `spring.threads.virtual.enabled=true`.
 * Achieves massive non-blocking I/O scale using straightforward, synchronous Java MVC code.
 
-### 2. Stateless OAuth2 Perimeter Firewall
-* Intercepts all incoming traffic before routing, enforcing JWT Bearer token validation via `SecurityConfig.java`.
-* Unauthenticated requests are immediately rejected with a clean `401 Unauthorized` without ever touching downstream services.
-* Default denyAll() fail-closed architecture ensures unmapped routes are never accidentally exposed.
-* Handles global CORS preflight (OPTIONS) requests seamlessly for React/Angular frontend integration.
+### 2. Stateless OAuth2 Perimeter Firewall (`SecurityConfig.java`)
+- Intercepts all incoming traffic before routing, enforcing JWT Bearer token validation and strict `SessionCreationPolicy.STATELESS` memory management (zero `HttpSession` heap allocations).
+- Enforces enterprise browser security headers out of the box: **HSTS** (1-year max-age with subdomains), **Clickjacking defense** (`X-Frame-Options: DENY`), and **MIME-sniffing protection** (`X-Content-Type-Options: nosniff`).
+- Default `denyAll()` fail-closed architecture ensures unmapped routes are never accidentally exposed.
+- Handles global CORS preflight (`OPTIONS`) requests and exposes `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`, and W3C `traceparent` headers to browser clients.
 
-### 3. Distributed Atomic Rate Limiter with Fail-Open Safety (DistributedRateLimiterFilter.java)
-* Executes an Atomic Lua Script across a single network round-trip to completely prevent race conditions (TOCTOU).
-* Tracks user timestamps across a rolling **30-second window**, limiting authenticated users across the cluster (e.g., 10 requests per 30 seconds, fully configurable via @Value annotations) to shield backend servers from DDoS attacks and API spam.
-* Returns standardized 429 Too Many Requests responses with unique request tracking IDs when cluster limits are exhausted.
-* Engineered with a Fail-Open resiliency strategy: If the Redis cluster goes down, a try-catch safety block catches the exception, logs a critical alert, and allows API traffic to pass through uninterrupted rather than generating cascading 500 errors.
+### 3. Lock-Free Distributed Atomic Rate Limiter (`DistributedRateLimiterFilter.java`)
+- Executes a Java 21 Text Block **Redis Lua Script** via cached `EVALSHA` in a single network hop (~1-2ms) using millisecond-precise `PEXPIRE` eviction, eliminating race conditions (TOCTOU) and returning the exact remaining request quota.
+- Uses lock-free `ThreadLocalRandom` instead of `UUID.randomUUID()` (`SecureRandom`) to prevent Virtual Thread synchronization bottlenecks under C10K load, while bypassing CORS `OPTIONS` and `/actuator/**` probes via `shouldNotFilter()`.
+- Emits standard `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` HTTP headers on every response.
+- Engineered with a **Fail-Open** resiliency strategy: If the Redis cluster goes down, the filter logs a critical alert and allows traffic through uninterrupted to preserve gateway availability.
 
-### 4. Downstream Header Hydration & Security Offloading
-* The gateway handles cryptographically heavy JWT verification at the perimeter.
-* Offloads execution weight from downstream nodes by appending an automated upstream identity confirmation header (X-Gateway-Validated: true) to safe, routed requests.
+### 4. Zero-Trust Header Sanitization & Security Offloading
+- Prevents external header-spoofing attacks by explicitly stripping any incoming `X-Gateway-Validated` header (`RemoveRequestHeader=X-Gateway-Validated`) before injecting a fresh `AddRequestHeader=X-Gateway-Validated, true`.
+- Offloads cryptographic JWT verification at the perimeter so downstream microservices can trust the sanitized header.
 
 ### 5. Client-Side Load Balancing (`spring-cloud-starter-loadbalancer`)
-* Configured with simple instance discovery (`lb://vector-service`) mapping traffic across multiple ports (`8081`, `8082`, `8083`).
-* Distributes compute load using a **Round-Robin** algorithm, ensuring uniform CPU utilization across all active microservice clones.
+- Configured with simple instance discovery (`lb://vector-service`) mapping traffic across multiple ports (`8081`, `8082`, `8083`).
+- Distributes compute load using a **Round-Robin** algorithm, ensuring uniform CPU utilization across all active microservice clones.
 
-### 6. Circuit Breaker & Fault Tolerance (`Resilience4j`)
-* Gateway Wraps API routes to prevent cascading failures if downstream backend services crash or hang.
-* Implements **Timeouts** (15s limit), **Retries** (for 502/504 network blips), and **Circuit Breaking** (trips if 50% of requests fail).
-* Automatically reroutes failed traffic to a graceful `/fallback` endpoint to return standard JSON 503 errors instead of locking up the gateway OS threads.
-* Wraps critical math operations with @CircuitBreaker (e.g., like vector addition: `@CircuitBreaker(name = "vectorMathService", fallbackMethod = "addVectorsFallback")`) .
-* Automatically trips when backend error thresholds are exceeded, instantly rerouting traffic to a fallback method that returns a safe default (zero-vector `{x:0, y:0, z:0}`) to prevent catastrophic cascading system failures.
+### 6. Circuit Breaker & RFC 9457 Fault Tolerance (`Resilience4j` + `FallbackController.java`)
+- Enforces strict upstream HTTP connect (`3000ms`) and read (`15000ms`) timeouts, **Retries** (for `502`/`504` blips), and **Circuit Breaking** (trips if 50% of requests fail or exceed the 15s slow-call threshold).
+- Automatically reroutes failed traffic to `/fallback`, returning a strongly-typed **RFC 9457 `ProblemDetail`** (`application/problem+json`) 503 response with a `Retry-After: 20` header instead of legacy `HashMap` payloads.
+- Downstream services additionally wrap critical math operations with `@CircuitBreaker` to return safe default zero-vectors (`{x:0, y:0, z:0}`) during partial failures.
 
 ### 7. Observability & Distributed Tracing (`Micrometer` + `OpenTelemetry`)
-* Generates a unique W3C `traceId` at the gateway perimeter and automatically injects it into standard console logs (MDC Log Correlation).
-* Propagates traces transparently via the `traceparent` HTTP header to downstream Node.js/Java microservices.
-* Ships telemetry data via OTLP to **Zipkin** for visual latency timelines, allowing you to debug exactly how many milliseconds the Redis script or Node backend took.
+- Generates a unique W3C `traceId` at the gateway perimeter and automatically injects `traceId` and `spanId` into standard console logs (MDC Log Correlation).
+- Propagates traces transparently via the `traceparent` HTTP header to downstream Node.js/Java microservices and exports spans via OTLP to **Zipkin** (`http://localhost:9411`).
 
-### 8. Cloud-Native Health Probes (Actuator)
-* Exposes an unauthenticated `/actuator/health` endpoint through the Spring Security firewall.
-* Allows AWS ALB, GCP Load Balancers, and Kubernetes liveness/readiness probes to verify container health, preventing traffic routing to frozen instances.
+### 8. Cloud-Native Health Probes & Multi-Stage AppCDS Container (`Dockerfile`)
+- Exposes unauthenticated `/actuator/health/**` liveness and readiness probes through the Spring Security firewall and native Docker `HEALTHCHECK`.
+- Uses a hardened multi-stage Alpine build running as an unprivileged user (`gatewayuser:gatewaygroup`) with Spring Boot Layered JAR extraction.
+- Pre-warms an **AppCDS (`application.jsa`)** class-data sharing archive at build time and pairs it with **Java 21 Generational ZGC** (`-XX:+UseZGC -XX:+ZGenerational`), cutting serverless cold-start times by ~50% and keeping GC pauses sub-millisecond.
 
-### 9. Enterprise Web Server Tuning
-* **HTTP/2 Enabled:** Massively reduces latency via TCP connection multiplexing.
-* **GZIP Compression:** Intercepts and shrinks large JSON array payloads by ~70-80% over the wire.
-* **Virtual-Thread Socket Optimization:** Tomcat's `max-connections` is increased to `20,000` with a `2,000` connection backlog queue. Because Virtual Threads consume almost zero RAM, the gateway handles C10K scale traffic bursts without memory exhaustion.
+### 9. Enterprise Web Server & Cloud Proxy Tuning (`application.yml`)
+- **Graceful Shutdown (`server.shutdown: graceful`):** Grants active Virtual Threads a `20s` drain window (`timeout-per-shutdown-phase: 20s`) to complete in-flight streams when AWS ECS, GCP Cloud Run, or Kubernetes scales down a pod.
+- **Cloud Load Balancer Trust (`forward-headers-strategy: framework`):** Properly resolves client IPs and HTTPS protocols from `X-Forwarded-For` and `X-Forwarded-Proto` headers behind AWS ALB, GCP Load Balancers, and Azure Front Door.
+- **HTTP/2 & GZIP Compression:** Multiplexes TCP connections and compresses both `application/json` and `application/problem+json` payloads larger than 1KB by ~70-80%.
+- **Virtual-Thread Socket Optimization:** Tunes Tomcat to `max-connections: 20000`, `accept-count: 2000`, and `connection-timeout: 5000` (Slowloris DDoS protection).
 
 ### 10. Automated ORM & Persistence (`Spring Data JPA` + `Hibernate 7`)
 * Uses thin interfaces (`VectorCalculationRepository`) extending `JpaRepository` to eliminate boilerplate JDBC code.
@@ -354,17 +355,17 @@ Expected Response (200 OK):JSON
 ]
 ```
 
-<b>6. Rate Limiter Exhaustion Test</b>
+<b>6. Rate Limiter Exhaustion Test (With Standard Rate-Limit Headers)</b>
 
-If you send more than 10 requests within a 30-second window, the gateway's Redis Lua script intercepts the traffic. Run this rapidly 11 times:
+If you send more than 10 requests within a 30-second window, the gateway's atomic Redis Lua script intercepts the traffic and emits standard rate-limit headers. Run this rapidly 11 times:
 
+```bash
+curl -i -H "Authorization: Bearer mock-test-token" -X POST http://localhost:8080/api/vectors/calculateMagnitude -H "Content-Type: application/json" -d "{\"x\": 1.0, \"y\": 2.0, \"z\": 3.0}"
 ```
-curl -v -H "Authorization: Bearer mock-test-token" -X POST http://localhost:8080/api/vectors/calculateMagnitude -H "Content-Type: application/json" -d "{\"x\": 1.0, \"y\": 2.0, \"z\": 3.0}"
-```
 
-Expected Response (429 Too Many Requests):JSON
+Expected Response (429 Too Many Requests):
 
-```
+```JSON
 {
   "timestamp": "2026-06-24T21:56:40.902+00:00",
   "path": "/api/vectors/calculateMagnitude",
@@ -374,6 +375,39 @@ Expected Response (429 Too Many Requests):JSON
   "requestId": "42d6c1d2-5"
 }
 ```
+
+```
+HTTP/1.1 429 Too Many Requests
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 0
+Retry-After: 30
+Content-Type: text/plain;charset=UTF-8
+
+Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster.
+```
+
+<b>7. Circuit Breaker Fallback Test (RFC 9457 ProblemDetail)</b>
+
+If the downstream microservice cluster is offline or times out, the gateway's Resilience4j Circuit Breaker forwards the request to `/fallback` and returns a standardized RFC 9457 `ProblemDetail` payload:
+
+```bash
+curl -i http://localhost:8080/fallback
+```
+
+Expected Response (503 Service Unavailable):
+
+```JSON
+{
+  "type": "about:blank",
+  "title": "Service Unavailable",
+  "status": 503,
+  "detail": "The AI generation service is experiencing heavy traffic and is temporarily unavailable. Please retry shortly.",
+  "instance": "/fallback",
+  "timestamp": "2026-06-24T22:00:00.000Z",
+  "retryAfterSeconds": 20
+}
+```
+
 ---
 
 ## 🧪 Automated Testing Suite

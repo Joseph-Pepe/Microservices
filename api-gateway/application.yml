@@ -15,7 +15,7 @@ server:
   compression:
     enabled: true
     min-response-size: 1024 # Only compress payloads larger than 1KB to save CPU
-    mime-types: application/json,application/xml,text/plain,text/css,application/javascript
+    mime-types: application/json,application/problem+json,application/xml,text/plain,text/css,application/javascript
 
   # 5. Tomcat Socket & Connection Tuning (Optimized for Virtual Threads)
   tomcat:
@@ -48,6 +48,10 @@ spring:
   threads:
     virtual:
       enabled: true
+
+  # Give in-flight AI generation streams up to 20 seconds to complete during container scale-down
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
 
   cloud:
     # 1. Provide a list of the available Vector API clones

@@ -160,6 +160,9 @@ public class DistributedRateLimiterFilter extends OncePerRequestFilter {
             remaining = defaultRemainingOnFailOpen;
         }
 
+        // Always inform the client of their total window capacity
+        response.setHeader("X-RateLimit-Limit", rateLimitStr);
+
         // 3. THE RULE: If they already have 10 requests, block them!
         if (remaining < 0) {
             log.warn("Rate limit exceeded for user '{}': Maximum allowance limit={} requests per {}ms exceeded", username, rateLimitStr, windowMsStr);

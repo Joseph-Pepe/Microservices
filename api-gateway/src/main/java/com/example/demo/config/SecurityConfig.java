@@ -91,7 +91,8 @@ public class SecurityConfig {
         // Allow the browser to send the Authorization header (containing your JWT)
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "traceparent"));
         // Optional: Expose custom headers back to the frontend (if your Gateway generates any)
-        configuration.setExposedHeaders(List.of("X-RateLimit-Remaining", "traceparent"));
+        // To allow React or Angular frontends to read the total limit and retry timer on a 429 Too Many Requests response, expose X-RateLimit-Limit and Retry-After.
+        configuration.setExposedHeaders(List.of("X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After", "traceparent"));
         configuration.setMaxAge(3600L);
 
         // Apply this configuration to every route passing through the Gateway (var: UrlBasedCorsConfigurationSource)

@@ -1,4 +1,4 @@
-# Dockerfile: Recipe that tells docker how to build and your shipping box.
+# Dockerfile: Recipe that tells docker how to build and deploy your shipping box.
 
 # =========================================================
 # STAGE 1: BUILD (The Builder Machine)
@@ -27,23 +27,28 @@ RUN java -Djarmode=layertools -jar target/*.jar extract
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-# Install curl for container-native healthchecks on AWS ECS / Docker Swarm
+# Install curl for container-native healthchecks, create non-root user, and grant ownership of /app on AWS ECS / Docker Swarm
 RUN apk add --no-cache curl && \
-    addgroup -S gatewaygroup && adduser -S gatewayuser -G gatewaygroup
+    addgroup -S gatewaygroup && adduser -S gatewayuser -G gatewaygroup && \
+    chown -R gatewayuser:gatewaygroup /app
 
 # SECURITY: Create a non-root user to run the gateway. 
 # If a hacker breaches the gateway, they do not get root access to the container.
 USER gatewayuser:gatewaygroup
 
-# Copy the extracted layers from the builder stage in order of least-frequently changed to most-frequently changed
-COPY --from=builder /build/dependencies/ ./
-COPY --from=builder /build/spring-boot-loader/ ./
-COPY --from=builder /build/snapshot-dependencies/ ./
-COPY --from=builder /build/application/ ./
+
+# Copy extracted layers with non-root ownership from the builder stage in order of least-frequently changed to most-frequently changed
+COPY --chown=gatewayuser:gatewaygroup --from=builder /build/dependencies/ ./
+COPY --chown=gatewayuser:gatewaygroup --from=builder /build/spring-boot-loader/ ./
+COPY --chown=gatewayuser:gatewaygroup --from=builder /build/snapshot-dependencies/ ./
+COPY --chown=gatewayuser:gatewaygroup --from=builder /build/application/ ./
 
 # PRE-WARM JVM ARCHIVE (AppCDS): Cuts Cloud Run / AWS cold-start time by ~50%
-RUN java -XX:ArchiveClassesAtExit=application.jsa -Dspring.context.exit=onRefresh org.springframework.boot.loader.launch.JarLauncher || true
-
+RUN java -XX:ArchiveClassesAtExit=application.jsa \
+    -Dspring.profiles.active=local \
+    -Dspring.context.exit=onRefresh \
+    org.springframework.boot.loader.launch.JarLauncher || true
+    
 # Expose the port the Gateway runs on
 EXPOSE 8080
 
