@@ -1,8 +1,8 @@
 # Microservice Ecosystem 🚀
 
-An enterprise-grade, horizontally scalable microservice architecture engineered with **Java 21 Virtual Threads**, **Spring Boot 4+**, **Spring Cloud Gateway MVC**, **Redis**, and **PostgreSQL**. 
+An enterprise-grade, horizontally scalable, C10K-capable microservice architecture engineered with **Java 21/25+ LTS Virtual Threads (Project Loom)**, **Project Leyden AOT Cache**, **Spring Boot 4.0+**, **Spring Cloud Gateway Server WebMVC**, **Valkey 8 / Redis 8**, and **PostgreSQL**.
 
-This system handles real-time computations, protected by stateless **OAuth2 (JWT)** security, an atomic distributed Redis rate limiter, and client-side load balancing. It is fully containerized and cloud-ready for **Google Cloud Platform (GCP)**.
+This system sits in front of high-throughput AI streaming and compute microservices, protected by stateless **Zero-Trust OAuth2 (JWT)** security, a lock-free atomic **Valkey 8 / Redis Lua** rate limiter, **Resilience4j** circuit breakers with **RFC 9457 (`ProblemDetail`)** contracts, and **OpenTelemetry Collector** distributed tracing. It is 100% cloud-agnostic and production-ready across **AWS**, **Google Cloud Platform (GCP)**, and **Microsoft Azure**.
 
 ## 🏛️ System Architecture
 
@@ -49,15 +49,15 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                                   Obtain Bearer JWT |                            |    Header: Authorization: Bearer <JWT>
                                                     v                            v
 +-----------------------------------+     +-------------------------------------------------+       +--------------------------------------+
-|      Commercial IDaaS Cloud       |     |      Spring Cloud API Gateway MVC (Tomcat)      |       |              Redis Cluster           |
-|  (Auth0 / Okta / AWS Cognito)     |     |                 (Port 8080)                     |       |              (Port 6379)             |
+|       Commercial IDaaS Cloud      |     |   Spring Boot 4 Gateway Server WebMVC (Tomcat)  |       |       Valkey 8 / Redis 8 Cluster     |
+|  (Auth0 / Okta / AWS Cognito)     |     |           (Port 8080 • JDK 25/26 AOT)           |       |     (Port 6379 • Multi-Thread I/O)   |
 +-----------------------------------+     +-------------------------------------------------+ <---> +--------------------------------------+
-| • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. OAuth2 Resource Server (Stateless JWT)      |       | • Key: rate_limit:{username=jwt.sub} |
-| • Hosts /.well-known/jwks.json    |     |  2. Global CORS Preflight Configuration         |       | • Data: Sorted Set (ZSET)            |
-+-----------------------------------+     |  3. Distributed Rate Limiter (Atomic Lua Script)|       | • Score: Epoch Millis Timestamp      |
-                                          |  4. Client-Side Load Balancer (Round-Robin)     |       | • Eviction: Auto TTL                 |
-                                          |  5. Java 21 Virtual Threads (Non-blocking I/O)  |       +--------------------------------------+
-                                          +-------------------------------------------------+       
+| • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. Zero-Trust OAuth2 JWT + Header Sanitization |       | • Key: rate_limit:{username=jwt.sub} |
+| • Hosts /.well-known/jwks.json    |     |  2. Lock-Free Rate Limiter (ThreadLocalRandom)  |       | • Script: Cached EVALSHA + PEXPIRE   |
++-----------------------------------+     |  3. Full-Duplex Virtual Threads (Tomcat + HTTP2)|       | • Engine: AWS ElastiCache / GCP      |
+                                          |  4. Resilience4j + RFC 9457 ProblemDetail       |       +--------------------------------------+
+                                          |  5. W3C OTLP Traces ──► OpenTelemetry Collector |
+                                          +-------------------------------------------------+  
                                                                    |
                                                           (Round-Robin Routing)
                                                                    |
@@ -102,18 +102,18 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
 
 | Component | Technology | Description |
 | :--- | :--- | :--- |
-| **Runtime** | Java 21 LTS | JDK 21 with Virtual Threads, Generational ZGC & AppCDS |
-| **Framework** | Spring Boot 3.2+ | Core Spring application engine with RFC 9457 ProblemDetails |
-| **Gateway** | Spring Cloud Gateway MVC | Servlet-based API Router & Client-Side Load Balancer |
-| **Security** | Spring Security 6 | Stateless OAuth2 JWT Firewall + HSTS / Anti-Spoofing |
-| **Caching/Limits** | Redis 7 | Atomic Lua rate limiting with Lettuce connection pooling |
-| **Database** | PostgreSQL 15 | Relational persistence engine |
-| **ORM** | Hibernate ORM | Object-Relational Mapping & DDL generation |
+| **Runtime** | Java 25 LTS / JDK 26 | Project Loom Virtual Threads, Native Generational ZGC & Project Leyden AOT Cache (JEP 514/516) |
+| **Framework** | Spring Boot 4.0+ | Core Spring 7 engine with RFC 9457 `ProblemDetail` & Global HTTP Client Timeouts |
+| **Gateway** | Spring Cloud Gateway Server WebMVC | `spring-cloud-starter-gateway-server-webmvc` (Spring Cloud 2025.1 Oakwood) + Virtual-Thread `RestClient` |
+| **Security** | Spring Security 6 / 7 | Stateless OAuth2 JWT Firewall + HSTS + Zero-Trust Header Sanitization |
+| **Caching/Limits** | Valkey 8 / Redis 8 | Multi-threaded async I/O datastore (AWS ElastiCache & GCP Memorystore for Valkey parity) |
+| **Database** | PostgreSQL 15+ | Relational persistence engine |
+| **ORM** | Hibernate ORM 7 | Object-Relational Mapping & DDL generation |
 | **Resilience** | Resilience4j | Circuit breakers, upstream timeouts & retry safety nets |
-| **Observability** | OpenTelemetry & Zipkin | W3C Distributed Tracing (`traceparent`) & OTLP Metrics |
+| **Observability** | OpenTelemetry Collector & Zipkin | Vendor-neutral OTLP pipeline routing W3C `traceparent` spans to Tempo, Jaeger v2, Datadog, or Zipkin |
 | **API Docs** | SpringDoc OpenAPI 3 / Swagger UI | Automated endpoint documentation |
-| **Container** | Docker (Multi-Stage) | Non-root Alpine JRE with Layered JARs & AppCDS pre-warming |
-| **Cloud** | AWS / GCP / Azure | 100% Cloud-Agnostic (Cloud Run, AWS ECS/Fargate, Azure ACA) |
+| **Container** | Docker (Multi-Stage) | Non-root Alpine JRE 25/26 with Layered JARs & Project Leyden `-XX:AOTCache` pre-warming |
+| **Cloud** | AWS / GCP / Azure | 100% Cloud-Agnostic (Cloud Run, AWS ECS/Fargate, Azure Container Apps) |
 
 --- 
 
@@ -123,12 +123,12 @@ The API Gateway is built following the **Twelve-Factor App** methodology. It req
 
 | Variable | Default Value | Description |
 | :--- | :--- | :--- |
-| `PORT` | `8080` | Dynamic port binding (Required for Cloud Run / App Runner). |
-| `REDIS_HOST` | `localhost` | The IP or DNS of your Redis cluster. |
-| `REDIS_PORT` | `6379` | The port for your Redis cluster. |
+| `PORT` | `8080` | Dynamic port binding (Required for Cloud Run / AWS App Runner). |
+| `REDIS_HOST` | `localhost` | The IP or DNS of your Valkey 8 / Redis 8 cluster. |
+| `REDIS_PORT` | `6379` | The port for your Valkey 8 / Redis 8 cluster. |
 | `BACKEND_SERVICE_URL` | `lb://vector-service` | The downstream routing URL. In production, change this to your cloud backend (e.g., `https://api.internal`). |
 | `JWT_ISSUER_URI` | `https://your-tenant.us.auth0.com/` | Your OIDC/OAuth2 provider URL (Auth0, Okta, AWS Cognito, Azure Entra ID). |
-| `ZIPKIN_URL` | `http://zipkin:4318/v1/traces` | The OTLP ingestion endpoint for Distributed Tracing. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4318/v1/traces` | The OpenTelemetry Collector OTLP HTTP ingestion endpoint. |
 | `SPRING_PROFILES_ACTIVE`| `local` | Set to `local` or `test` for mock JWT decoding; set to `prod` in live deployments. |
 
 ---
@@ -136,17 +136,17 @@ The API Gateway is built following the **Twelve-Factor App** methodology. It req
 ## 🚀 Local Development Setup
 
 ### Prerequisites
-* **JDK 21+** installed and added to your system `PATH`.
-* **Docker & Docker Compose** installed for cluster orchestration.
-* **Apache Maven** (or use the included `mvnw` wrapper scripts).
-* **PostgreSQL Server** running locally on port `5432` (via Docker or native Windows/macOS installer).
-* **Redis Server** can run locally on port `6379`.
+- **JDK 25 LTS** (or **JDK 26** for JEP 516 ZGC Object Caching / **JDK 21 LTS**) installed and added to your system `PATH`.
+- **Docker & Docker Compose** installed for cluster orchestration.
+- **Apache Maven** (or use the included `mvnw` wrapper scripts).
+- **PostgreSQL Server** running locally on port `5432` (via Docker or native installer).
+- **Valkey 8 / Redis 8 Server** running locally on port `6379`.
 
 ## Docker (Recommended)
 
 <b>Step #1: One-Click Docker Cluster</b>
 
-To boot the entire distributed ecosystem (API Gateway, Node.js Backend, Redis Cluster, PostgreSQL, and Zipkin Tracing) simultaneously using your optimized multi-stage Docker builds:
+To boot the entire distributed ecosystem (Java 25/26 Spring Boot 4 API Gateway, Node.js Backend, Valkey 8 Cluster, PostgreSQL, OpenTelemetry Collector, and Zipkin UI) simultaneously using your Leyden AOT multi-stage Docker builds:
 
 ```terminal
 docker-compose up -d --build
@@ -201,9 +201,9 @@ netstat -ano | findstr 5432
 
 ## ✨ Key Features
 
-### 1. Java 21 Virtual Threads (api-gateway)
-* Replaces legacy OS thread pools and reactive WebFlux complexity by enabling `spring.threads.virtual.enabled=true`.
-* Achieves massive non-blocking I/O scale using straightforward, synchronous Java MVC code.
+### 1. Full-Duplex Virtual Threads (`api-gateway` + `GatewayHttpClientConfig.java`)
+- Replaces legacy OS thread pools and reactive WebFlux complexity by enabling `spring.threads.virtual.enabled=true` on Tomcat (`max-connections: 20000`) **and** backing the outbound `RestClient` (`JdkClientHttpRequestFactory`) with `Executors.newVirtualThreadPerTaskExecutor()` over HTTP/2.
+- Both inbound servlet connections and outbound blocking I/O / AI Server-Sent Events (SSE) stream waits unmount from OS carrier threads in nanoseconds—achieving C10K+ scale with clean, debuggable synchronous code.
 
 ### 2. Stateless OAuth2 Perimeter Firewall (`SecurityConfig.java`)
 - Intercepts all incoming traffic before routing, enforcing JWT Bearer token validation and strict `SessionCreationPolicy.STATELESS` memory management (zero `HttpSession` heap allocations).
@@ -211,11 +211,10 @@ netstat -ano | findstr 5432
 - Default `denyAll()` fail-closed architecture ensures unmapped routes are never accidentally exposed.
 - Handles global CORS preflight (`OPTIONS`) requests and exposes `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`, and W3C `traceparent` headers to browser clients.
 
-### 3. Lock-Free Distributed Atomic Rate Limiter (`DistributedRateLimiterFilter.java`)
-- Executes a Java 21 Text Block **Redis Lua Script** via cached `EVALSHA` in a single network hop (~1-2ms) using millisecond-precise `PEXPIRE` eviction, eliminating race conditions (TOCTOU) and returning the exact remaining request quota.
-- Uses lock-free `ThreadLocalRandom` instead of `UUID.randomUUID()` (`SecureRandom`) to prevent Virtual Thread synchronization bottlenecks under C10K load, while bypassing CORS `OPTIONS` and `/actuator/**` probes via `shouldNotFilter()`.
-- Emits standard `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` HTTP headers on every response.
-- Engineered with a **Fail-Open** resiliency strategy: If the Redis cluster goes down, the filter logs a critical alert and allows traffic through uninterrupted to preserve gateway availability.
+### 3. Lock-Free Distributed Atomic Rate Limiter (`Valkey 8 / Redis 8` + `DistributedRateLimiterFilter.java`)
+- Powered by **Valkey 8 / Redis 8** with multi-threaded network I/O (`--io-threads 4`) to match **AWS ElastiCache** and **GCP Memorystore for Valkey**, executing a Java Text Block **Lua Script** via cached `EVALSHA` in a single network hop (~1ms) with millisecond-precise `PEXPIRE` eviction.
+- Uses lock-free `ThreadLocalRandom` instead of `UUID.randomUUID()` (`SecureRandom`) to prevent Virtual Thread synchronization bottlenecks under C10K load.
+- Emits standard `X-RateLimit-Limit` and `X-RateLimit-Remaining` HTTP headers on every response.
 
 ### 4. Zero-Trust Header Sanitization & Security Offloading
 - Prevents external header-spoofing attacks by explicitly stripping any incoming `X-Gateway-Validated` header (`RemoveRequestHeader=X-Gateway-Validated`) before injecting a fresh `AddRequestHeader=X-Gateway-Validated, true`.
@@ -230,14 +229,14 @@ netstat -ano | findstr 5432
 - Automatically reroutes failed traffic to `/fallback`, returning a strongly-typed **RFC 9457 `ProblemDetail`** (`application/problem+json`) 503 response with a `Retry-After: 20` header instead of legacy `HashMap` payloads.
 - Downstream services additionally wrap critical math operations with `@CircuitBreaker` to return safe default zero-vectors (`{x:0, y:0, z:0}`) during partial failures.
 
-### 7. Observability & Distributed Tracing (`Micrometer` + `OpenTelemetry`)
-- Generates a unique W3C `traceId` at the gateway perimeter and automatically injects `traceId` and `spanId` into standard console logs (MDC Log Correlation).
-- Propagates traces transparently via the `traceparent` HTTP header to downstream Node.js/Java microservices and exports spans via OTLP to **Zipkin** (`http://localhost:9411`).
+### 7. Polyglot W3C Observability (`Micrometer` + `OpenTelemetry Collector`)
+- Generates a unique W3C `traceId` at the gateway perimeter, injects `traceId` and `spanId` into standard console logs (MDC Log Correlation), and propagates context downstream via the `traceparent` HTTP header across Java and Node.js.
+- Exports spans via OTLP (`http://otel-collector:4318/v1/traces`) to a vendor-neutral **OpenTelemetry Collector** (`otel-collector-config.yaml`), which batches and fans out traces to **Grafana Tempo**, **Jaeger v2**, **Datadog**, or **Zipkin** (`http://localhost:9411`) without code changes.
 
-### 8. Cloud-Native Health Probes & Multi-Stage AppCDS Container (`Dockerfile`)
-- Exposes unauthenticated `/actuator/health/**` liveness and readiness probes through the Spring Security firewall and native Docker `HEALTHCHECK`.
-- Uses a hardened multi-stage Alpine build running as an unprivileged user (`gatewayuser:gatewaygroup`) with Spring Boot Layered JAR extraction.
-- Pre-warms an **AppCDS (`application.jsa`)** class-data sharing archive at build time and pairs it with **Java 21 Generational ZGC** (`-XX:+UseZGC -XX:+ZGenerational`), cutting serverless cold-start times by ~50% and keeping GC pauses sub-millisecond.
+### 8. Cloud-Native Health Probes & Project Leyden AOT Cache (`Dockerfile`)
+- Exposes unauthenticated `/actuator/health/readiness` and `/liveness` probes through the Spring Security firewall and native Docker `HEALTHCHECK`.
+- Uses a hardened multi-stage Alpine JRE 25/26 build running as an unprivileged user (`gatewayuser:gatewaygroup`) with Spring Boot 4 layered extraction (`-Djarmode=tools extract --layers --launcher`).
+- Performs a single-step **Project Leyden AOT Cache** training and assembly build (`-XX:AOTCacheOutput=application.aot` via JDK 25 JEP 514/515, and JDK 26 JEP 516 for GC-agnostic ZGC object caching) and loads `-XX:AOTCache=application.aot` alongside native **Generational ZGC** (`-XX:+UseZGC`), cutting Cloud Run and AWS ECS cold-start times by over 50% while keeping GC pauses sub-millisecond.
 
 ### 9. Enterprise Web Server & Cloud Proxy Tuning (`application.yml`)
 - **Graceful Shutdown (`server.shutdown: graceful`):** Grants active Virtual Threads a `20s` drain window (`timeout-per-shutdown-phase: 20s`) to complete in-flight streams when AWS ECS, GCP Cloud Run, or Kubernetes scales down a pod.
@@ -474,14 +473,14 @@ TRAFFIC INBOUND (Global Users)
        ▼
 ┌────────────────────────────────────────────────────────┐
 │    Cloud Run (Hosts your api-gateway Docker image)     │
-│    ⚡ Powered by Java 21/25 Virtual Threads            │
+│   ⚡ Java 25/26 Virtual Threads + Leyden AOT Cache     │
 └────────────────────────────────────────────────────────┘
        │                 │
-       │ (Lua Script)    │ (Round-Robin Routing)
+       │ (Lua EVALSHA)   │ (Virtual-Thread HTTP/2 Router)
        ▼                 ▼
 ┌──────────────┐   ┌─────────────────────────────────────┐
-│ MemoryStore  │   │        Microservice Cluster         │
-│   (Redis)    │   │  (vector-api 1, vector-api 2, etc.) │
+│ Memorystore  │   │        Microservice Cluster         │
+│ (Valkey 8)   │   │  (vector-api 1, vector-api 2, etc.) │
 └──────────────┘   └─────────────────────────────────────┘
 ```
 
@@ -526,7 +525,9 @@ gcloud run deploy api-gateway \
   --set-env-vars REDIS_HOST=10.X.X.X \
   --set-env-vars REDIS_PORT=6379 \
   --set-env-vars BACKEND_SERVICE_URL=https://vector-api-xyz.a.run.app \
-  --set-env-vars ZIPKIN_URL=https://your-zipkin-server/v1/traces \
+  --set-env-vars OTEL_EXPORTER_OTLP_ENDPOINT=https://your-otel-collector:4318/v1/traces \
+  --set-env-vars JWT_ISSUER_URI=https://your-tenant.us.auth0.com/ \
+  --set-env-vars SPRING_PROFILES_ACTIVE=prod \
   --set-env-vars SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE=64 \
   --set-env-vars SPRING_DATA_REDIS_LETTUCE_POOL_MAX_IDLE=16 \
   --set-env-vars APP_RATE_LIMIT_WINDOW_MS=30000 \

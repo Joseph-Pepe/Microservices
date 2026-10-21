@@ -53,6 +53,13 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
+  # Spring Boot 4 Global HTTP Client Timeouts (applied to RestClient & Gateway)
+  http:
+    # Enforce strict upstream connect and read timeouts
+    clients:
+      connect-timeout: 3s
+      read-timeout: 15s
+
   cloud:
     # 1. Provide a list of the available Vector API clones
     discovery:
@@ -66,26 +73,39 @@ spring:
 
     # 2. Tell the Virtual Thread Gateway to use the Load Balancer (lb://) to find a server in the 'vector-service' cluster
     gateway:
-      mvc:
-        # Enforce strict upstream connect and read timeouts
-        http-client:
-          connect-timeout: 3000
-          read-timeout: 15000
-        routes:
-          - id: vector_service_route
-            uri: ${BACKEND_SERVICE_URL:lb://vector-service} # Allows pointing directly to a cloud URL
-            predicates:
-              - Path=/api/vectors/**
-            filters:
-              # ZERO-TRUST: Strip any spoofed validation headers sent by external attackers first!
-              - RemoveRequestHeader=X-Gateway-Validated
-              # Automatically adds a custom header to the request before it hits your microservice!
-              # e.g., vector-service needs to know the username (logs who requested the calculation) by extracting it and passing it as a plain HTTP header.
-              - AddRequestHeader=X-Gateway-Validated, true
-              # RULE #1: [RETRY] Try 2 total times for transient network errors (502, 504), try again one more time before giving up b/c it probably was a network blip.
-              - Retry=2,502 BAD_GATEWAY,504 GATEWAY_TIMEOUT
-              # RULE #2: [CIRCUIT BREAKER] If backend is dead, route traffic to our local /fallback endpoint (i.e., if the backend fails 50% of the time, open the circuit and return a friendly fallback message instead of making the user wait for a timeout).
-              - CircuitBreaker=vectorCircuitBreaker,forward:/fallback
+      # Spring Cloud 2025.1+ (Spring Boot 4) Gateway Server WebMVC namespace
+      server:
+        webmvc:
+          routes:
+            - id: vector_service_route
+              uri: ${BACKEND_SERVICE_URL:lb://vector-service} # Allows pointing directly to a cloud URL
+              predicates:
+                - Path=/api/vectors/**
+              filters:
+                # ZERO-TRUST: Strip any spoofed validation headers sent by external attackers first!
+                - RemoveRequestHeader=X-Gateway-Validated
+                # Automatically adds a custom header to the request before it hits your microservice!
+                # e.g., vector-service needs to know the username (logs who requested the calculation) by extracting it and passing it as a plain HTTP header.
+                - AddRequestHeader=X-Gateway-Validated, true
+                # RULE #1: [RETRY] Try 2 total times for transient network errors (502, 504), try again one more time before giving up b/c it probably was a network blip.
+                - Retry=2,502 BAD_GATEWAY,504 GATEWAY_TIMEOUT
+                # RULE #2: [CIRCUIT BREAKER] If backend is dead, route traffic to our local /fallback endpoint (i.e., if the backend fails 50% of the time, open the circuit and return a friendly fallback message instead of making the user wait for a timeout).
+                - CircuitBreaker=vectorCircuitBreaker,forward:/fallback
+      # mvc:
+      #   # Enforce strict upstream connect and read timeouts
+      #   http-client:
+      #     connect-timeout: 3000
+      #     read-timeout: 15000
+      #   routes:
+      #     - id: vector_service_route
+      #       uri: ${BACKEND_SERVICE_URL:lb://vector-service} 
+      #       predicates:
+      #         - Path=/api/vectors/**
+      #       filters:
+      #         - RemoveRequestHeader=X-Gateway-Validated
+      #         - AddRequestHeader=X-Gateway-Validated, true
+      #         - Retry=2,502 BAD_GATEWAY,504 GATEWAY_TIMEOUT
+      #         - CircuitBreaker=vectorCircuitBreaker,forward:/fallback
 
   # 3. Redis Infrastructure Integration
   data:
@@ -160,9 +180,11 @@ management:
       probability: 1.0
   otlp:
     tracing:
+      # Export W3C traces via OTLP to the OpenTelemetry Collector (fans out to Tempo, Jaeger v2, Datadog, or Zipkin)
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://otel-collector:4318/v1/traces}
       # The standard endpoint for an OpenTelemetry Collector or OTLP-compatible backend (like Zipkin)
       # Use the exact service name defined in docker-compose.yml
-      endpoint: ${ZIPKIN_URL:http://zipkin:4318/v1/traces}
+      # endpoint: ${ZIPKIN_URL:http://zipkin:4318/v1/traces}
 
 # ==========================================
 # LOG CORRELATION (MDC)

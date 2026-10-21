@@ -40,6 +40,7 @@ public class FallbackController {
         problem.setProperty("timestamp", Instant.now());
         problem.setProperty("retryAfterSeconds", 20);
 
+        // Return a graceful 503 so the frontend knows to display a "Try again later" UI
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header("Retry-After", "20")
                 .body(problem);

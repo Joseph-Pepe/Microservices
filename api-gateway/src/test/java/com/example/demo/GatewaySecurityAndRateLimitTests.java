@@ -6,11 +6,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.time.Duration;
 import java.util.stream.IntStream;
+import java.util.Objects;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("local") // 1. CRITICAL: This boots your local profile to enable your mock JwtDecoder!
@@ -39,11 +41,10 @@ class GatewaySecurityAndRateLimitTests {
     @Test
     void testSpammingServer_shouldTriggerRateLimiter429() {
         var patientClient = webClient.mutate()
-                .responseTimeout(Duration.ofSeconds(10))
+                .responseTimeout(Objects.requireNonNull(Duration.ofSeconds(10)))
                 .build();
 
-        // 2. Rapidly fire 10 valid requests WITH bearer tokens!
-        // Fire 10 valid requests using modern Java IntStream
+        // 2. Rapidly fire 10 valid requests WITH bearer tokens using modern Java IntStream
         IntStream.range(0, 10).forEach(i ->
             patientClient.post().uri("/api/vectors/calculateMagnitude")
                     .headers(headers -> headers.setBearerAuth("mock-test-token-string")) // Triggers mock decoder!
@@ -62,6 +63,23 @@ class GatewaySecurityAndRateLimitTests {
                 .expectBody(String.class)
                 // Match the exact plain-text error message written by your response.getWriter().write()
                 .isEqualTo("Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster.");
+    }
+
+    @Test
+    void testCircuitBreakerFallback_shouldReturnRfc9457ProblemDetail503() {
+        // 4. Verify the Resilience4j fallback endpoint returns a valid RFC 9457 ProblemDetail contract
+        webClient.get().uri("/fallback")
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+                .expectHeader().valueEquals("Retry-After", "20")
+                .expectHeader().contentTypeCompatibleWith(Objects.requireNonNull(MediaType.APPLICATION_PROBLEM_JSON))
+                .expectBody()
+                .jsonPath("$.title").isEqualTo("Service Unavailable")
+                .jsonPath("$.status").isEqualTo(503)
+                .jsonPath("$.detail").isEqualTo("The AI generation service is experiencing heavy traffic and is temporarily unavailable. Please retry shortly.")
+                .jsonPath("$.instance").isEqualTo("/fallback")
+                .jsonPath("$.retryAfterSeconds").isEqualTo(20)
+                .jsonPath("$.timestamp").exists();
     }
 }
 

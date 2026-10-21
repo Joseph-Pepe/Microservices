@@ -3,28 +3,39 @@
 version: '3.8'
 
 services:
-  # Distributed Tracing Dashboard
+  # 0. Vendor-Neutral OpenTelemetry Collector (Routes to Zipkin, Grafana Tempo, Jaeger v2, or Datadog)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC receiver
+      - "4318:4318" # OTLP HTTP receiver (Ingestion Port) for Spring Boot 4 & Node.js
+    depends_on:
+      - zipkin
+    networks:
+      - lyria-network
+
+  # Distributed Tracing Dashboard UI (Receives spans from otel-collector)
   zipkin:
     image: openzipkin/zipkin:latest
     ports:
       # navigate to "http://localhost:9411" in your browser to see a timeline graph showing exactly how many milliseconds the gateway spent running the redis lua rate limiter, and how long it waited for the microservices and Node.js backend to respond.
       - "9411:9411" # Zipkin Web UI
-      - "4318:4318" # OTLP HTTP Ingestion Port for Spring Boot
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
     networks:
       - lyria-network
 
-  # 1. The Distributed Rate Limiting Database
+  # 1. The Distributed Rate Limiting Database: Valkey 8 (Linux Foundation BSD drop-in replacement for Redis 8 — matches AWS ElastiCache & GCP Memorystore)
   redis-cluster:
-    image: redis:7-alpine
+    image: valkey/valkey:8-alpine
     ports:
       - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["valkey-server", "--appendonly", "yes", "--io-threads", "4", "--io-threads-do-reads", "yes"]
     networks:
       - lyria-network
 
-  # 2. Your Java 21 API Gateway
+  # 2. Java 25/26 + Spring Boot 4 API Gateway
   api-gateway:
     build: 
       context: ./path-to-java-gateway
@@ -36,13 +47,13 @@ services:
       # REDIS_URL=redis://redis-cluster:6379
       - REDIS_HOST=redis-cluster
       - REDIS_PORT=6379
-      - ZIPKIN_URL=http://zipkin:4318/v1/traces
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
       - BACKEND_SERVICE_URL=http://node-backend:8000
       # Use 'local' when testing without a live Auth0/Okta URL, or provide JWT_ISSUER_URI for 'prod'
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local} # SPRING_PROFILES_ACTIVE=prod
     depends_on:
       - redis-cluster
-      - zipkin
+      - otel-collector
     networks:
       - lyria-network
 
