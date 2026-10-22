@@ -1,38 +1,72 @@
 package com.example.demo; 
 
+import com.example.demo.config.DistributedRateLimiterFilter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import java.time.Duration;
-import java.util.stream.IntStream;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.IntStream;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles("local") // 1. CRITICAL: This boots your local profile to enable your mock JwtDecoder!
+@ActiveProfiles("local") // 1. CRITICAL: Boots local profile to enable LocalSecurityMockConfig!
 class GatewaySecurityAndRateLimitTests {
 
     @Autowired
     private WebTestClient webClient; 
 
-    @Autowired
+    // Spring Boot 4.0+ spy annotation (use @SpyBean if compiling against Spring Boot 3.2.x)
+    @MockitoSpyBean
     private StringRedisTemplate redisTemplate;
 
+    @Autowired
+    private DistributedRateLimiterFilter rateLimiterFilter;
+
     @BeforeEach
-    void resetRedisRateLimitBucket() {
-        // Ensure every test run starts with a clean slate in Redis
-        redisTemplate.delete("rate_limit:local-admin-tester");
+    void resetRateLimiterState() {
+        // 1. Clear any Mockito outage stubs from previous tests
+        Mockito.reset(redisTemplate);
+
+        // 2. Reset in-memory Circuit Breaker & Local Fallback state between tests
+        ((AtomicInteger) Objects.requireNonNull(
+                ReflectionTestUtils.getField(rateLimiterFilter, "consecutiveRedisFailures"))).set(0);
+        ((AtomicLong) Objects.requireNonNull(
+                ReflectionTestUtils.getField(rateLimiterFilter, "circuitOpenUntilMillis"))).set(0L);
+        ((Map<?, ?>) Objects.requireNonNull(
+                ReflectionTestUtils.getField(rateLimiterFilter, "localFallbackWindows"))).clear();
+
+        try {
+            // 3. Ensure every test run starts with a clean slate in Valkey/Redis
+            redisTemplate.delete(java.util.List.of("rate_limit:local-admin-tester", "rate_limit:outage-tester"));
+        } catch (Exception ignored) {
+            // Ignore if running the test suite without a local Redis container
+        }
     }
 
     @Test
     void testHackerAttempt_shouldReturn401Unauthorized() {
-        // No Authorization header sent -> should block instantly
+        // No Authorization header sent -> should block instantly at the perimeter
         webClient.post().uri("/api/vectors/calculateMagnitude")
                 .exchange()
                 .expectStatus().isUnauthorized();
@@ -51,7 +85,7 @@ class GatewaySecurityAndRateLimitTests {
                     .exchange()
         );
 
-        // 3. An 11th request must be blocked by the atomic Redis Lua script.
+        // 3. An 11th request must be blocked by the atomic Valkey/Redis Lua script.
         // The Lua script has 10 entries for "local-admin-tester" in Redis, so it will block this one.
         patientClient.post().uri("/api/vectors/calculateMagnitude")
                 .headers(headers -> headers.setBearerAuth("mock-test-token-string"))
@@ -66,8 +100,45 @@ class GatewaySecurityAndRateLimitTests {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void testValkeyOutage_shouldTripCircuitAndEnforceLocalFallback429() {
+        var patientClient = webClient.mutate()
+                .responseTimeout(Objects.requireNonNull(Duration.ofSeconds(10)))
+                .build();
+
+        // 1. Simulate a complete Valkey/Redis cluster outage
+        doThrow(new RedisConnectionFailureException("Simulated Valkey cluster outage"))
+                .when(redisTemplate)
+                .execute(any(RedisScript.class), anyList(), any(), any(), any(), any());
+
+        // 2. Fire 10 requests as "user:outage-tester" (supported by LocalSecurityMockConfig:
+        //    - Requests 1-5 fail on Redis, trip the Circuit Breaker OPEN, and fall back to local JVM memory.
+        //    - Requests 6-10 short-circuit Redis completely (0 network calls) and use local JVM memory.
+        IntStream.range(0, 10).forEach(i ->
+            patientClient.post().uri("/api/vectors/calculateMagnitude")
+                    .headers(headers -> headers.setBearerAuth("user:outage-tester"))
+                    .exchange()
+        );
+
+        // 3. The 11th request must STILL be blocked (HTTP 429) by the Bounded Local Fallback!
+        patientClient.post().uri("/api/vectors/calculateMagnitude")
+                .headers(headers -> headers.setBearerAuth("user:outage-tester"))
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
+                .expectHeader().valueEquals("X-RateLimit-Limit", "10")
+                .expectHeader().valueEquals("X-RateLimit-Remaining", "0")
+                .expectHeader().valueEquals("Retry-After", "30")
+                .expectBody(String.class)
+                .isEqualTo("Rate limit exceeded! You are limited to 10 requests per 30 seconds across the cluster.");
+
+        // 4. PROVE CIRCUIT BREAKER TRIPPED: Out of 11 HTTP requests, Redis was only called 5 times!
+        verify(redisTemplate, times(5))
+                .execute(any(RedisScript.class), anyList(), any(), any(), any(), any());
+    }
+
+    @Test
     void testCircuitBreakerFallback_shouldReturnRfc9457ProblemDetail503() {
-        // 4. Verify the Resilience4j fallback endpoint returns a valid RFC 9457 ProblemDetail contract
+        // 5. Verify the Resilience4j fallback endpoint returns a valid RFC 9457 ProblemDetail contract
         webClient.get().uri("/fallback")
                 .exchange()
                 .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)

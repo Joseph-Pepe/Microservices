@@ -107,11 +107,13 @@ spring:
       #         - Retry=2,502 BAD_GATEWAY,504 GATEWAY_TIMEOUT
       #         - CircuitBreaker=vectorCircuitBreaker,forward:/fallback
 
-  # 3. Redis Infrastructure Integration
+  # 3. Redis / Valkey 8 Infrastructure Integration
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # FAIL-FAST: Never let a hung Redis socket stall a Virtual Thread for more than 250ms
+      timeout: 250ms
       # Enable connection pooling for Lettuce to match Virtual Thread throughput
       lettuce:
         pool:

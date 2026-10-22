@@ -50,14 +50,14 @@ RAW HTTP REQUEST ──► [ Authorization: Bearer eyJhbGciOi... ]
                                                     v                            v
 +-----------------------------------+     +-------------------------------------------------+       +--------------------------------------+
 |       Commercial IDaaS Cloud      |     |   Spring Boot 4 Gateway Server WebMVC (Tomcat)  |       |       Valkey 8 / Redis 8 Cluster     |
-|  (Auth0 / Okta / AWS Cognito)     |     |           (Port 8080 • JDK 25/26 AOT)           |       |     (Port 6379 • Multi-Thread I/O)   |
+|  (Auth0 / Okta / AWS Cognito)     |     |           (Port 8080 • JDK 25/26 AOT)           |       |   (Port 6379 • 250ms Fail-Fast I/O)  |
 +-----------------------------------+     +-------------------------------------------------+ <---> +--------------------------------------+
 | • Issues OIDC / OAuth2 Bearer JWT | <-- |  1. Zero-Trust OAuth2 JWT + Header Sanitization |       | • Key: rate_limit:{username=jwt.sub} |
-| • Hosts /.well-known/jwks.json    |     |  2. Lock-Free Rate Limiter (ThreadLocalRandom)  |       | • Script: Cached EVALSHA + PEXPIRE   |
-+-----------------------------------+     |  3. Full-Duplex Virtual Threads (Tomcat + HTTP2)|       | • Engine: AWS ElastiCache / GCP      |
+| • Hosts /.well-known/jwks.json    |     |  2. Valkey Lua Primary + Circuit Local Fallback |       | • Script: Cached EVALSHA + PEXPIRE   |
++-----------------------------------+     |  3. Full-Duplex Virtual Threads (Tomcat + HTTP2)|       | • Fallback: Bounded 10k-User JVM RAM |
                                           |  4. Resilience4j + RFC 9457 ProblemDetail       |       +--------------------------------------+
                                           |  5. W3C OTLP Traces ──► OpenTelemetry Collector |
-                                          +-------------------------------------------------+  
+                                          +-------------------------------------------------+
                                                                    |
                                                           (Round-Robin Routing)
                                                                    |
@@ -211,10 +211,11 @@ netstat -ano | findstr 5432
 - Default `denyAll()` fail-closed architecture ensures unmapped routes are never accidentally exposed.
 - Handles global CORS preflight (`OPTIONS`) requests and exposes `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`, and W3C `traceparent` headers to browser clients.
 
-### 3. Lock-Free Distributed Atomic Rate Limiter (`Valkey 8 / Redis 8` + `DistributedRateLimiterFilter.java`)
-- Powered by **Valkey 8 / Redis 8** with multi-threaded network I/O (`--io-threads 4`) to match **AWS ElastiCache** and **GCP Memorystore for Valkey**, executing a Java Text Block **Lua Script** via cached `EVALSHA` in a single network hop (~1ms) with millisecond-precise `PEXPIRE` eviction.
-- Uses lock-free `ThreadLocalRandom` instead of `UUID.randomUUID()` (`SecureRandom`) to prevent Virtual Thread synchronization bottlenecks under C10K load.
-- Emits standard `X-RateLimit-Limit` and `X-RateLimit-Remaining` HTTP headers on every response.
+### 3. Two-Tier Distributed Rate Limiter with Circuit-Broken Local Fallback (`DistributedRateLimiterFilter.java`)
+- **Primary Tier (Valkey 8 / Redis 8 Atomic Lua):** Powered by multi-threaded **Valkey 8** (`--io-threads 4`), executing a pre-compiled Java Text Block **Lua Script** via cached `EVALSHA` in a single network hop (~1ms) with millisecond-precise `PEXPIRE` sliding-window eviction.
+- **Fail-Fast Socket Protection (`250ms` Timeout):** Configured with `spring.data.redis.timeout: 250ms` in `application.yml` so a Redis network brownout or GC freeze never stalls Virtual Threads.
+- **Degraded Tier (Circuit-Broken Bounded Local Fallback):** Instead of a naive blanket fail-open that leaves downstream AI/DB services unshielded during cache outages, an atomic lock-free Circuit Breaker (`AtomicInteger` / `AtomicLong`) trips open for `15s` after `5` consecutive Redis failures. While open, requests bypass dead network sockets in `~0.05ms` and are governed by a lock-free in-memory sliding window (`ConcurrentLinkedDeque`) capped at `10,000` active users to prevent `OutOfMemoryError`.
+- **Zero Lock Contention & Standard Headers:** Uses `ThreadLocalRandom` instead of `UUID.randomUUID()` (`SecureRandom`) to avoid Virtual Thread synchronization bottlenecks, bypasses CORS `OPTIONS` and `/actuator/**` probes via `shouldNotFilter()`, and emits `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `Retry-After` headers on every response.
 
 ### 4. Zero-Trust Header Sanitization & Security Offloading
 - Prevents external header-spoofing attacks by explicitly stripping any incoming `X-Gateway-Validated` header (`RemoveRequestHeader=X-Gateway-Validated`) before injecting a fresh `AddRequestHeader=X-Gateway-Validated, true`.
@@ -249,9 +250,8 @@ netstat -ano | findstr 5432
 * Configured with `ddl-auto: update`, allowing Hibernate to dynamically inspect and generate PostgreSQL database tables (`vector_calculations`) at startup.
 * Implements ACID-compliant persistence, saving timestamped vector inputs and calculated magnitudes into a permanent ledger.
 
-### 11. High-Throughput Integration Testing (`WebTestClient`)
-* Complete automated test suite (`GatewaySecurityAndRateLimitTests.java`) matching the synchronous Servlet architecture.
-* Utilizes `@ActiveProfiles("local")` and custom timeout mutations to verify edge-case security failures and rate-limiter exhaustion.
+### 11. Chaos & Resilience Integration Testing (`WebTestClient` + `@MockitoSpyBean`)
+- Complete 4-stage automated test harness (`GatewaySecurityAndRateLimitTests.java`) verifying perimeter OAuth2 security, Valkey Lua rate limiting, simulated Valkey cluster outages via `@MockitoSpyBean` (proving the Circuit Breaker short-circuits Redis after 5 failures and enforces the local fallback), and RFC 9457 `ProblemDetail` circuit-breaker responses.
 
 ---
 
@@ -411,7 +411,9 @@ Expected Response (503 Service Unavailable):
 
 ## 🧪 Automated Testing Suite
 
-The system includes an automated integration test harness that spins up an isolated server environment using Spring Boot's @SpringBootTest and WebTestClient.To run the automated security and rate-limiting tests:
+The system includes a 4-stage integration and chaos-testing harness (`GatewaySecurityAndRateLimitTests.java`) powered by `@SpringBootTest`, `WebTestClient`, and Spring Boot 4's `@MockitoSpyBean`. Before each test, `@BeforeEach` resets Redis rate-limit keys, Mockito spy stubs, and in-memory circuit breaker states for deterministic execution.
+
+To run the automated security, rate-limiting, and resiliency tests:
 
 ```terminal
 cd api-gateway
@@ -420,9 +422,13 @@ mvnw clean test
 
 Test Cases Covered:
 
-1. testHackerAttempt_shouldReturn401Unauthorized: Proves that requests missing Bearer tokens are blocked at the perimeter before routing.
-2. testSpammingServer_shouldTriggerRateLimiter429: Executes a rapid loop of 10 valid requests to fill the queue, then asserts that the 11th request is rejected by Redis with HTTP 429 Too Many Requests.
+1. testHackerAttempt_shouldReturn401Unauthorized: Proves that unauthenticated requests missing JWT Bearer tokens are immediately rejected with 401 Unauthorized at the perimeter firewall before touching downstream routes.
 
+2. testSpammingServer_shouldTriggerRateLimiter429: Fires an IntStream burst of 10 valid authenticated requests and asserts that the 11th request is blocked by the Valkey/Redis EVALSHA Lua script with 429 Too Many Requests, X-RateLimit-Limit: 10, X-RateLimit-Remaining: 0, and Retry-After: 30.
+
+3. testValkeyOutage_shouldTripCircuitAndEnforceLocalFallback429: Injects a simulated RedisConnectionFailureException via @MockitoSpyBean to mimic a complete Valkey cluster outage. Proves that the rate-limiter Circuit Breaker trips open after exactly 5 failed Redis calls (verify(redisTemplate, times(5))), short-circuits the dead network socket for requests 6–11, and still blocks the 11th request with 429 Too Many Requests using the bounded in-memory JVM sliding window.
+
+4. testCircuitBreakerFallback_shouldReturnRfc9457ProblemDetail503: Verifies that when Resilience4j trips on a downstream microservice failure and forwards to /fallback, the gateway returns an RFC 9457 ProblemDetail (application/problem+json) payload with 503 Service Unavailable and Retry-After: 20.
 ---
 
 ## 🌩️ Extreme Load Testing (C10K Verification)
