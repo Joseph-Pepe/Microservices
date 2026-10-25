@@ -52,7 +52,9 @@ COPY --chown=gatewayuser:gatewaygroup --from=builder /build/extracted/applicatio
 
 # PROJECT LEYDEN AOT CACHE (JDK 25+ JEP 514 / JDK 26 JEP 516):
 # Single-step training + assembly run that pre-links classes & objects for 50%+ faster cold starts
-RUN java -XX:AOTCacheOutput=application.aot \
+# CRITICAL: Must include -XX:+UseCompactObjectHeaders here so the AOT cache matches the 64-bit runtime layout!
+RUN java -XX:+UseCompactObjectHeaders \
+    -XX:AOTCacheOutput=application.aot \
     -Dspring.profiles.active=local \
     -Dspring.context.exit=onRefresh \
     org.springframework.boot.loader.launch.JarLauncher || true
@@ -65,31 +67,21 @@ HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT:-8080}/actuator/health/readiness || exit 1
 
 # =========================================================
-# STAGE 3: Production JVM Flags for Containers
+# STAGE 3: Production JVM Flags for Containers (JDK 25/26)
 # =========================================================
-
-# - UseZGC + ZGenerational: Sub-millisecond GC pauses
 # - SharedArchiveFile: Instant class loading via AppCDS
 # - ExitOnOutOfMemoryError: Fail fast so Kubernetes/Cloud Run immediately restarts the pod
+# - UseZGC: Natively Generational in JDK 24+ (sub-millisecond GC pauses)
+# - AOTCache: Loads Project Leyden ahead-of-time class & object cache
+# - UseCompactObjectHeaders: Shrink the JVM memory header of every single Java object in RAM from 96–128 bits down to 64 bits. Reduces your gateway's heap footprint by 10% to 20% and improves CPU L1/L2 cache locality by ~8% with zero code changes.
 
 # 1. Use Container memory limits instead of host memory limits.
 # 2. Use the modern Spring Boot JarLauncher instead of a fat JAR.
 # 3. Generational ZGC reduces CPU overhead and memory footprint by splitting the heap into old/new generations (must manually enable it).
-# ENTRYPOINT ["java", \
-#   "-XX:MaxRAMPercentage=75.0", \
-#   "-XX:+UseZGC", \
-#   "-XX:+ZGenerational", \
-#   "-XX:SharedArchiveFile=application.jsa", \
-#   "-XX:+ExitOnOutOfMemoryError", \
-#   "-Djava.security.egd=file:/dev/./urandom", \
-#   "org.springframework.boot.loader.launch.JarLauncher"]
-
-# Production JVM Flags (JDK 25/26):
-# - UseZGC: Natively Generational in JDK 24+ (sub-millisecond GC pauses)
-# - AOTCache: Loads Project Leyden ahead-of-time class & object cache
 ENTRYPOINT ["java", \
   "-XX:MaxRAMPercentage=75.0", \
   "-XX:+UseZGC", \
+  "-XX:+UseCompactObjectHeaders", \
   "-XX:AOTCache=application.aot", \
   "-XX:+ExitOnOutOfMemoryError", \
   "-Djava.security.egd=file:/dev/./urandom", \

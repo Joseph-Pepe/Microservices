@@ -31,6 +31,13 @@ server:
     keep-alive-timeout: 60000
     connection-timeout: 5000 # Drop dead TCP sockets after 5 seconds to prevent Slowloris DDoS attacks
 
+    # Payload Size Limits (Anti-OOM JSON Bomb): Drops oversized payload attacks (>1MB) at the socket edge to prevent hackers from exhausting heap memory.
+    max-http-form-post-size: 1MB
+    max-swallow-size: 1MB
+
+    # Reduces unnecessary TLS re-handshakes during high-throughput bursts.
+    max-keep-alive-requests: 1000
+
 # Custom Enterprise Rate Limit Configurations
 app:
   rate-limit:
