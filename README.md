@@ -458,6 +458,7 @@ cd ../Web_Application_Spring && ./mvnw clean test
 ## 🌩️ Load Testing
 
 **1. Test Tomcat Virtual Thread Socket Acceptance (`/actuator/health`)**
+
 ```bash
 hey -z 15s -c 5000 http://localhost:8080/actuator/health
 ```
@@ -467,6 +468,35 @@ hey -z 15s -c 5000 http://localhost:8080/actuator/health
 hey -n 1000 -c 100 -m GET http://localhost:8080/api/vectors/ping
 ```
 *(The first 10 requests succeed; the remaining 990 are immediately blocked with HTTP `429` by Valkey GCRA before reaching `vector-service`.)*
+
+---
+
+## 🌩️ End-to-End Load Testing (`k6`)
+
+Rather than benchmarking unauthenticated `/actuator/health` probes, `api-gateway/load-tests/gateway-benchmark.js` tests the **complete L7 proxy data path**: edge OAuth2 JWT decoding → Valkey GCRA `EVALSHA` → `Gradient2` Adaptive Concurrency Limiter → `SignInternalAuth` HS256 minting → `RestClient` proxying → `vector-service` PostgreSQL persistence.
+
+**1. Run End-to-End Proxy + GCRA Burst Benchmark (`local` profile):**
+
+```bash
+k6 run api-gateway/load-tests/gateway-benchmark.js
+```
+**2. Run Against Staging / Production with a Real Bearer JWT & Streaming Scenario:**
+
+```bash
+k6 run \
+  -e GATEWAY_URL=https://api.your-domain.com \
+  -e BEARER_TOKEN="eyJhbGciOiJSUzI1NiIs..." \
+  -e ENABLE_SSE_SCENARIO=true \
+  api-gateway/load-tests/gateway-benchmark.js
+```
+
+---
+
+### Run Step 3 Verification Now
+
+```bash
+cd api-gateway && ./mvnw clean test
+```
 
 ---
 

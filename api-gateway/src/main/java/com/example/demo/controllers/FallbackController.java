@@ -1,14 +1,12 @@
 package com.example.demo.controllers;
 
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-// import java.util.HashMap;
-// import java.util.Map;
 
 import java.net.URI;
 import java.time.Instant;
@@ -30,13 +28,18 @@ public class FallbackController {
 
     @RequestMapping("/fallback")
     public ResponseEntity<ProblemDetail> serviceFallback(HttpServletRequest request) {
+        Object forwardedUri = request.getAttribute(RequestDispatcher.FORWARD_REQUEST_URI);
+        String instanceUri = (forwardedUri instanceof String path && !path.isBlank())
+                ? path
+                : request.getRequestURI();
+
         // RFC 9457 Standard ProblemDetail (Zero-overhead, strongly-typed error contract)
         var problem = ProblemDetail.forStatusAndDetail(
-            HttpStatus.SERVICE_UNAVAILABLE,
-            "The AI generation service is experiencing heavy traffic and is temporarily unavailable. Please retry shortly."
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "The AI generation service is experiencing heavy traffic and is temporarily unavailable. Please retry shortly."
         );
         problem.setTitle("Service Unavailable");
-        problem.setInstance(URI.create(request.getRequestURI()));
+        problem.setInstance(URI.create(instanceUri));
         problem.setProperty("timestamp", Instant.now());
         problem.setProperty("retryAfterSeconds", 20);
 

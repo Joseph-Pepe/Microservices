@@ -1,0 +1,76 @@
+server:
+  port: ${PORT:${SERVER_PORT:8081}}
+
+app:
+  internal-auth:
+    secret: ${INTERNAL_AUTH_SECRET:dev-only-internal-auth-hmac-secret-key-change-in-prod-32bytes!}
+    expected-issuer: ${INTERNAL_AUTH_ISSUER:api-gateway}
+    max-ttl-seconds: ${INTERNAL_AUTH_MAX_TTL_SECONDS:60}
+    clock-skew-seconds: ${INTERNAL_AUTH_CLOCK_SKEW_SECONDS:5}
+
+spring:
+  # 1. OPT-IN TO VIRTUAL THREADS: Matches the Gateway's internal scale
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/vector_db}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:your_super_secret_password}
+    driver-class-name: org.postgresql.Driver
+
+     # 2. HIKARICP POOL OPTIMIZATION: Prevents Virtual Thread context starvation
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      idle-timeout: 30000
+      pool-name: VectorHikariCP
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update # This tells Hibernate to automatically create your database tables based on your Java code!
+    show-sql: ${JPA_SHOW_SQL:true} # Prints the SQL Hibernate generates to your terminal so you can see the magic
+    properties:
+      hibernate:
+        format_sql: true
+
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:true}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:true}
+
+# Resilience4j MUST be at the root level (all the way to the left), not inside 'spring'
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: "health"
+
+resilience4j.circuitbreaker:
+  instances:
+    vectorMathService:              # Must match the 'name' attribute in @CircuitBreaker annotation!
+      slidingWindowSize: 10         # Check the last 10 requests
+      failureRateThreshold: 50      # If 50% (3+ out of 5) of them fail, TRIP THE BREAKER!
+      waitDurationInOpenState: 5000ms # Stay open (blocking traffic) for 5 seconds before trying again.
+      permittedNumberOfCallsInHalfOpenState: 2 # Let 2 test requests in to see if the server recovered
+
+# Separator ( --- ) separates the document from the prod-only version to override. 
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  jpa:
+    show-sql: false
+
+springdoc:
+  api-docs:
+    enabled: ${SPRINGDOC_ENABLED:false}
+  swagger-ui:
+    enabled: ${SPRINGDOC_ENABLED:false}

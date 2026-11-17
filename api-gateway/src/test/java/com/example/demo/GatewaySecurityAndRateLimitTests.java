@@ -1,5 +1,6 @@
 package com.example.demo;
 
+import com.example.demo.config.AdaptiveConcurrencyFilter;
 import com.example.demo.config.DistributedRateLimiterFilter;
 import com.example.demo.security.InternalAuthTokenService;
 import com.example.demo.security.InternalAuthTokenService.InternalAuthTokenException;
@@ -70,9 +71,13 @@ class GatewaySecurityAndRateLimitTests {
     private static int mockBackendPort;
     private static final AtomicInteger postNoRetryHits = new AtomicInteger(0);
     private static final AtomicInteger getRetryHits = new AtomicInteger(0);
+    private static final AtomicInteger slowAiHits = new AtomicInteger(0);
     private static final AtomicReference<String> lastObservedLegacyHeader = new AtomicReference<>();
     private static final AtomicReference<String> lastObservedInternalAuthHeader = new AtomicReference<>();
     private static final AtomicReference<InternalClaims> lastVerifiedClaims = new AtomicReference<>();
+
+    private static volatile CountDownLatch slowSlotsOccupiedLatch = new CountDownLatch(0);
+    private static volatile CountDownLatch releaseSlowRequestsLatch = new CountDownLatch(0);
 
     @BeforeAll
     static void startMockBackend() throws IOException {
@@ -107,6 +112,24 @@ class GatewaySecurityAndRateLimitTests {
             exchange.close();
         });
 
+        mockBackendServer.createContext("/api/vectors/slow-ai", exchange -> {
+            if (!verifyDownstreamInternalAuth(exchange)) {
+                return;
+            }
+            slowAiHits.incrementAndGet();
+            slowSlotsOccupiedLatch.countDown();
+            try {
+                releaseSlowRequestsLatch.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            byte[] body = "{\"status\":\"completed\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+
         mockBackendServer.createContext("/api/vectors/no-retry-post", exchange -> {
             if (!verifyDownstreamInternalAuth(exchange)) {
                 return;
@@ -126,8 +149,7 @@ class GatewaySecurityAndRateLimitTests {
         });
 
         // Immediately close connection without sending HTTP headers -> IOException -> CircuitBreaker fallback
-        mockBackendServer.createContext("/api/vectors/trigger-fallback", HttpExchange::close);
-
+        mockBackendServer.createContext("/api/vectors/trigger-fallback", exchange -> exchange.close());
         mockBackendServer.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         mockBackendServer.start();
     }
@@ -183,6 +205,9 @@ class GatewaySecurityAndRateLimitTests {
     private DistributedRateLimiterFilter rateLimiterFilter;
 
     @Autowired
+    private AdaptiveConcurrencyFilter adaptiveConcurrencyFilter;
+
+    @Autowired
     private InternalAuthTokenService internalAuthTokenService;
 
     @BeforeEach
@@ -190,11 +215,15 @@ class GatewaySecurityAndRateLimitTests {
         // 1. Clear any Mockito outage stubs from previous tests
         Mockito.reset(redisTemplate);
         rateLimiterFilter.resetForTesting();
+        adaptiveConcurrencyFilter.resetForTesting();
         postNoRetryHits.set(0);
         getRetryHits.set(0);
+        slowAiHits.set(0);
         lastObservedLegacyHeader.set(null);
         lastObservedInternalAuthHeader.set(null);
         lastVerifiedClaims.set(null);
+        slowSlotsOccupiedLatch = new CountDownLatch(0);
+        releaseSlowRequestsLatch = new CountDownLatch(0);
 
         try {
             // 2. Ensure every test run starts with a clean slate
@@ -207,6 +236,9 @@ class GatewaySecurityAndRateLimitTests {
                     "rate_limit:{user:get-retry-tester}",
                     "rate_limit:{user:fallback-uri-tester}",
                     "rate_limit:{user:spoof-tester}",
+                    "rate_limit:{user:concurrency-shed-1}",
+                    "rate_limit:{user:concurrency-shed-2}",
+                    "rate_limit:{user:concurrency-shed-3}",
                     "rate_limit:{ip:127.0.0.1}",
                     "rate_limit:{ip:0:0:0:0:0:0:0:1}"
             ));
@@ -243,7 +275,9 @@ class GatewaySecurityAndRateLimitTests {
                 .header(InternalAuthTokenService.LEGACY_HEADER_NAME, "true")
                 .header(InternalAuthTokenService.HEADER_NAME, spoofedForgedToken)
                 .exchange()
-                .expectStatus().isOk();
+                .expectStatus().isOk()
+                .expectHeader().exists("X-Concurrency-Limit")
+                .expectHeader().exists("X-Concurrency-InFlight");
 
         // Gateway MUST strip legacy X-Gateway-Validated and client-supplied X-Internal-Auth
         assertThat(lastObservedLegacyHeader.get()).isNull();
@@ -296,6 +330,69 @@ class GatewaySecurityAndRateLimitTests {
         assertThatThrownBy(() -> internalAuthTokenService.verifyToken(algNoneToken))
                 .isInstanceOf(InternalAuthTokenException.class)
                 .hasMessageContaining("alg");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void testAdaptiveConcurrencyShedding_shouldReturnRfc9457_503WhenConcurrencyExceeded() throws Exception {
+        doReturn(9L).when(redisTemplate).execute(any(RedisScript.class), anyList(), any(), any());
+
+        // Restrict rest partition concurrency ceiling to 2 slots to test saturation deterministically
+        adaptiveConcurrencyFilter.getRestLimiter().overrideLimitForTesting(2);
+        slowSlotsOccupiedLatch = new CountDownLatch(2);
+        releaseSlowRequestsLatch = new CountDownLatch(1);
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var req1 = executor.submit(() ->
+                    webClient.post().uri("/api/vectors/slow-ai")
+                            .headers(headers -> headers.setBearerAuth("user.concurrency-shed-1"))
+                            .exchange()
+                            .expectStatus().isOk()
+            );
+            var req2 = executor.submit(() ->
+                    webClient.post().uri("/api/vectors/slow-ai")
+                            .headers(headers -> headers.setBearerAuth("user.concurrency-shed-2"))
+                            .exchange()
+                            .expectStatus().isOk()
+            );
+
+            // Wait until both concurrency slots are actively blocked downstream
+            assertThat(slowSlotsOccupiedLatch.await(5, TimeUnit.SECONDS)).isTrue();
+
+            // 3rd request from a distinct user must be shed immediately by AdaptiveConcurrencyFilter (0 backend hits)
+            webClient.post().uri("/api/vectors/slow-ai")
+                    .headers(headers -> headers.setBearerAuth("user.concurrency-shed-3"))
+                    .exchange()
+                    .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+                    .expectHeader().valueEquals("Retry-After", "2")
+                    .expectHeader().valueEquals("X-Concurrency-Limit", "2")
+                    .expectHeader().valueEquals("X-Concurrency-InFlight", "2")
+                    .expectHeader().contentTypeCompatibleWith(Objects.requireNonNull(MediaType.APPLICATION_PROBLEM_JSON))
+                    .expectBody()
+                    .jsonPath("$.title").isEqualTo("Service Unavailable")
+                    .jsonPath("$.status").isEqualTo(503)
+                    .jsonPath("$.instance").isEqualTo("/api/vectors/slow-ai")
+                    .jsonPath("$.concurrencyLimit").isEqualTo(2)
+                    .jsonPath("$.inFlight").isEqualTo(2)
+                    .jsonPath("$.retryAfterSeconds").isEqualTo(2);
+
+            assertThat(slowAiHits.get()).isEqualTo(2);
+
+            // Release the 2 held backend requests and verify slots drain cleanly
+            releaseSlowRequestsLatch.countDown();
+            req1.get(5, TimeUnit.SECONDS);
+            req2.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseSlowRequestsLatch.countDown();
+        }
+
+        // Subsequent request succeeds once in-flight slots drain back to 0
+        assertThat(adaptiveConcurrencyFilter.getRestLimiter().getInFlight()).isZero();
+        webClient.post().uri("/api/vectors/slow-ai")
+                .headers(headers -> headers.setBearerAuth("user.concurrency-shed-3"))
+                .exchange()
+                .expectStatus().isOk();
+        assertThat(slowAiHits.get()).isEqualTo(3);
     }
 
     @Test

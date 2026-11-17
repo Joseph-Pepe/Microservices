@@ -1,7 +1,6 @@
 server:
   # ${ENVIRONMENT_VARIABLE_NAME:default_value} injects parameterized environment variable with a fallback to port 8080 (i.e., dynamic port binding).
   port: ${PORT:8080}
-
   # 1. CRITICAL FOR AWS/GCP/AZURE: Trust X-Forwarded-For & X-Forwarded-Proto from Cloud Load Balancers
   forward-headers-strategy: framework
   # 2. ZERO-DOWNTIME DEPLOYMENTS: Wait for active Virtual Threads to finish before stopping container
@@ -22,36 +21,58 @@ server:
     # Max simultaneous TCP connections Tomcat will hold open. 
     # Because Virtual Threads use almost zero RAM, we can safely bump this from the default (8192) to 20000.
     max-connections: 20000
-    
+
     # The OS-level TCP backlog queue. If 20,000 users are connected, and 2,000 more try to connect 
     # at the exact same millisecond, they wait in this queue instead of getting "Connection Refused".
     accept-count: 2000
-    
+
     # Keep idle connections open for 60 seconds to prevent constant TLS handshake overhead.
     keep-alive-timeout: 60000
-    connection-timeout: 5000 # Drop dead TCP sockets after 5 seconds to prevent Slowloris DDoS attacks
+    connection-timeout: 5000  # Drop dead TCP sockets after 5 seconds to prevent Slowloris DDoS attacks
 
     # Payload Size Limits (Anti-OOM JSON Bomb): Drops oversized payload attacks (>1MB) at the socket edge to prevent hackers from exhausting heap memory.
     max-http-form-post-size: 1MB
     max-swallow-size: 1MB
-
     # Reduces unnecessary TLS re-handshakes during high-throughput bursts.
     max-keep-alive-requests: 1000
-
 # Custom Enterprise Rate Limit Configurations
 app:
   rate-limit:
-    window-ms: 30000   # 30 seconds in milliseconds
-    limit: 10          # Max 10 requests allowed per window
+    window-ms: ${RATE_LIMIT_WINDOW_MS:30000} # 30 seconds in milliseconds
+    limit: ${RATE_LIMIT_LIMIT:10}            # Max 10 requests allowed per window
+  adaptive-concurrency:
+    enabled: ${ADAPTIVE_CONCURRENCY_ENABLED:true}
+    rest:
+      initial-limit: ${CONCURRENCY_REST_INITIAL_LIMIT:64}
+      min-limit: ${CONCURRENCY_REST_MIN_LIMIT:4}
+      max-limit: ${CONCURRENCY_REST_MAX_LIMIT:512}
+      rtt-tolerance: ${CONCURRENCY_REST_RTT_TOLERANCE:1.5}
+      window-ms: ${CONCURRENCY_REST_WINDOW_MS:500}
+      retry-after-seconds: ${CONCURRENCY_REST_RETRY_AFTER_SECONDS:2}
+    stream:
+      initial-limit: ${CONCURRENCY_STREAM_INITIAL_LIMIT:256}
+      min-limit: ${CONCURRENCY_STREAM_MIN_LIMIT:8}
+      max-limit: ${CONCURRENCY_STREAM_MAX_LIMIT:2048}
+      rtt-tolerance: ${CONCURRENCY_STREAM_RTT_TOLERANCE:2.0}
+      window-ms: ${CONCURRENCY_STREAM_WINDOW_MS:2000}
+      retry-after-seconds: ${CONCURRENCY_STREAM_RETRY_AFTER_SECONDS:5}
+  proxy:
+    connect-timeout: ${PROXY_CONNECT_TIMEOUT:3s}
+    read-timeout: ${PROXY_READ_TIMEOUT:120s}
+  internal-auth:
+    secret: ${INTERNAL_AUTH_SECRET:dev-only-internal-auth-hmac-secret-key-change-in-prod-32bytes!}
+    issuer: ${INTERNAL_AUTH_ISSUER:api-gateway}
+    ttl-seconds: ${INTERNAL_AUTH_TTL_SECONDS:30}
+    clock-skew-seconds: ${INTERNAL_AUTH_CLOCK_SKEW_SECONDS:5}
   cors:
     # Comma-separated list of allowed frontend domains
-    allowed-origins: "http://localhost:3000, http://localhost:4200, http://localhost:8000"
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:4200,http://localhost:8000}
 
 spring:
   application:
     name: api-gateway
 
-  # Enables Virtual Threads for Tomcat and Async Tasks (automatically gains the asynchronous event loop under the hood)
+  # Enables Virtual Threads for Tomcat and Async Tasks (automatically gains the asynchronous event loop under the hood) 
   threads:
     virtual:
       enabled: true
@@ -60,15 +81,14 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
-  # Spring Boot 4 Global HTTP Client Timeouts (applied to RestClient & Gateway)
-  http:
-    # Enforce strict upstream connect and read timeouts
-    clients:
-      connect-timeout: 3s
-      read-timeout: 15s
-
+  # # Spring Boot 4 Global HTTP Client Timeouts (applied to RestClient & Gateway)
+  # http:
+  #   # Enforce strict upstream connect and read timeouts
+  #   clients:
+  #     connect-timeout: 3s
+  #     read-timeout: 15s
   cloud:
-    # 1. Provide a list of the available Vector API clones
+     # 1. Provide a list of the available Vector API clones
     discovery:
       client:
         simple:
@@ -78,26 +98,90 @@ spring:
               - uri: http://localhost:8082
               - uri: http://localhost:8083
 
+    loadbalancer:
+      configurations: health-check
+      health-check:
+        initial-delay: 1s
+        interval: 10s
+        refetch-instances: true
+        refetch-instances-interval: 10s
+        path:
+          default: /actuator/health
+
     # 2. Tell the Virtual Thread Gateway to use the Load Balancer (lb://) to find a server in the 'vector-service' cluster
     gateway:
       # Spring Cloud 2025.1+ (Spring Boot 4) Gateway Server WebMVC namespace
       server:
         webmvc:
           routes:
-            - id: vector_service_route
-              uri: ${BACKEND_SERVICE_URL:lb://vector-service} # Allows pointing directly to a cloud URL
+            # 1. Long-lived AI SSE Streaming Route (No retries; streaming-safe 120s TimeLimiter)
+            - id: vector_service_stream_route
+              uri: ${BACKEND_SERVICE_URL:lb://vector-service}
+              predicates:
+                - Path=/api/vectors/stream/**
+              filters:
+                - RemoveRequestHeader=X-Gateway-Validated
+                - RemoveRequestHeader=X-Internal-Auth
+                - SignInternalAuth
+                - name: CircuitBreaker
+                  args:
+                    id: vectorStreamCircuitBreaker
+                    fallbackUri: forward:/fallback
+
+            # 2. Idempotent Read Route (GET/HEAD)
+            - id: vector_service_read_route
+              uri: ${BACKEND_SERVICE_URL:lb://vector-service}
               predicates:
                 - Path=/api/vectors/**
+                - Method=GET,HEAD
               filters:
-                # ZERO-TRUST: Strip any spoofed validation headers sent by external attackers first!
+                - RemoveRequestHeader=X-Gateway-Validated
+                - RemoveRequestHeader=X-Internal-Auth
+                - SignInternalAuth
+                - name: CircuitBreaker
+                  args:
+                    id: vectorReadCircuitBreaker
+                    fallbackUri: forward:/fallback
+                    statusCodes:
+                      - "500"
+                      - "502"
+                      - "503"
+                      - "504"
+                - name: Retry
+                  args:
+                    retries: 2
+                    statuses:
+                      - BAD_GATEWAY
+                      - GATEWAY_TIMEOUT
+                    methods:
+                      - GET
+                      - HEAD
+
+            # 3. Mutating Write Route (POST/PUT/PATCH/DELETE - no automatic retries)
+            - id: vector_service_mutation_route
+              uri: ${BACKEND_SERVICE_URL:lb://vector-service}
+              predicates:
+                - Path=/api/vectors/**
+                - Method=POST,PUT,PATCH,DELETE
+              filters:
+                  # ZERO-TRUST: Strip any spoofed validation headers sent by external attackers first!
                 - RemoveRequestHeader=X-Gateway-Validated
                 # Automatically adds a custom header to the request before it hits your microservice!
                 # e.g., vector-service needs to know the username (logs who requested the calculation) by extracting it and passing it as a plain HTTP header.
-                - AddRequestHeader=X-Gateway-Validated, true
-                # RULE #1: [RETRY] Try 2 total times for transient network errors (502, 504), try again one more time before giving up b/c it probably was a network blip.
-                - Retry=2,502 BAD_GATEWAY,504 GATEWAY_TIMEOUT
+                - RemoveRequestHeader=X-Internal-Auth
+                - SignInternalAuth
+                # # RULE #1: [RETRY] Try 2 total times for transient network errors (502, 504), try again one more time before giving up b/c it probably was a network blip.
+                # - Retry=2,502 BAD_GATEWAY,504 GATEWAY_TIMEOUT
                 # RULE #2: [CIRCUIT BREAKER] If backend is dead, route traffic to our local /fallback endpoint (i.e., if the backend fails 50% of the time, open the circuit and return a friendly fallback message instead of making the user wait for a timeout).
-                - CircuitBreaker=vectorCircuitBreaker,forward:/fallback
+                - name: CircuitBreaker
+                  args:
+                    id: vectorMutationCircuitBreaker
+                    fallbackUri: forward:/fallback
+                    statusCodes:
+                      - "500"
+                      - "502"
+                      - "503"
+                      - "504"
       # mvc:
       #   # Enforce strict upstream connect and read timeouts
       #   http-client:
@@ -121,12 +205,12 @@ spring:
       port: ${REDIS_PORT:6379}
       # FAIL-FAST: Never let a hung Redis socket stall a Virtual Thread for more than 250ms
       timeout: 250ms
-      # Enable connection pooling for Lettuce to match Virtual Thread throughput
-      lettuce:
-        pool:
-          max-active: 64
-          max-idle: 16
-          min-idle: 8
+      # # Enable connection pooling for Lettuce to match Virtual Thread throughput
+      # lettuce:
+      #   pool:
+      #     max-active: 64
+      #     max-idle: 16
+      #     min-idle: 8
 
   # Cryptographic Stateless Security (Resource Server Mode)
   security:
@@ -136,7 +220,7 @@ spring:
         jwt:
           # Parameterized for instant deployment to Auth0, Okta, AWS Cognito, GCP, or Azure Entra ID
           issuer-uri: ${JWT_ISSUER_URI:https://your-tenant.us.auth0.com/}
-          
+
           # Simply paste your commercial provider's Issuer URL!
           # For Auth0 [https://your-tenant.us.auth0.com/]
           # For Okta  [https://dev-123456.okta.com/oauth2/default]
@@ -164,12 +248,29 @@ resilience4j:
         # Allow requests to take up to 15 seconds (Generative AI takes time)
         slowCallDurationThreshold: 15s
         slowCallRateThreshold: 50
+    instances:
+      vectorReadCircuitBreaker:
+        baseConfig: default
+        slowCallDurationThreshold: 10s
+      vectorMutationCircuitBreaker:
+        baseConfig: default
+        slowCallDurationThreshold: 20s
+      vectorStreamCircuitBreaker:
+        baseConfig: default
+        slowCallDurationThreshold: 90s
+
   timelimiter:
     configs:
       default:
-        # Hard kill any proxy connection that takes longer than 16 seconds
-        timeoutDuration: 16s 
-        
+        # Hard kill any proxy connection that takes longer than 15 seconds
+        timeoutDuration: 15s
+    instances:
+      vectorReadCircuitBreaker:
+        timeoutDuration: 15s
+      vectorMutationCircuitBreaker:
+        timeoutDuration: 30s
+      vectorStreamCircuitBreaker:
+        timeoutDuration: 120s
 # ==========================================
 # OBSERVABILITY & DISTRIBUTED TRACING
 # ==========================================
@@ -177,16 +278,17 @@ management:
   endpoint:
     health:
       probes:
-        enabled: true # Tells the cloud if the app is booting vs fully ready to take traffic
+        enabled: true  # Tells the cloud if the app is booting vs fully ready to take traffic
   endpoints:
     web:
       exposure:
-        include: "health,prometheus" # Expose the health endpoint
+        include: "health" # Expose the health endpoint
+        # include: "health,prometheus"
   tracing:
     sampling:
       # Set to 1.0 (100%) for development so every request is tracked.
       # In production with massive traffic, drop this to 0.1 (10%) or 0.01 (1%).
-      probability: 1.0
+      probability: ${OTEL_TRACING_SAMPLE_RATE:1.0}
   otlp:
     tracing:
       # Export W3C traces via OTLP to the OpenTelemetry Collector (fans out to Tempo, Jaeger v2, Datadog, or Zipkin)

@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Configuration
-@Profile({"local", "test"}) // Strictly isolated to local development and automated test suites // CRITICAL: This ensures this mock never accidentally deploys to production
+@Profile({"local", "test"})  // Strictly isolated to local development and automated test suites // CRITICAL: This ensures this mock never accidentally deploys to production
 public class LocalSecurityMockConfig {
 
     private static final Logger log = LoggerFactory.getLogger(LocalSecurityMockConfig.class);
@@ -37,16 +37,17 @@ public class LocalSecurityMockConfig {
 
     /**
      * High-speed local JwtDecoder stub.
-     * - Defaults 'sub' to "local-admin-tester" (matching GatewaySecurityAndRateLimitTests).
-     * - Supports dynamic multi-user testing if the token starts with "user:" (e.g., "Bearer user:alice").
+     * - Defaults 'sub' to "local-admin-tester".
+     * - Supports RFC 6750-compliant multi-user testing via "Bearer user.<subject>" (e.g., "Bearer user.alice").
      */
     @Bean
     public JwtDecoder localJwtDecoder() {
         return token -> {
             var now = Instant.now();
-            var subject = (token != null && token.startsWith("user:"))
-                    ? token.substring(5)
-                    : DEFAULT_TEST_SUBJECT;
+            String subject = DEFAULT_TEST_SUBJECT;
+            if (token != null && (token.startsWith("user.") || token.startsWith("user:"))) {
+                subject = token.substring(5);
+            }
 
             return new Jwt(
                     token,
@@ -62,13 +63,5 @@ public class LocalSecurityMockConfig {
                     )
             );
         };
-        // return token -> Jwt.withTokenValue(token)
-        //         .header("alg", "none")
-        //         // The 'sub' (subject) claim is what Spring uses for principal.getName()
-        //         // This string ("local-admin-tester") will become your Redis Rate Limiting Key!
-        //         .claim("sub", "local-admin-tester") 
-        //         .issuedAt(Instant.now())
-        //         .expiresAt(Instant.now().plusSeconds(3600))
-        //         .build();
     }
 }
