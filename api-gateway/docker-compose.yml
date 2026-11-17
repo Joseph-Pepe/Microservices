@@ -1,6 +1,5 @@
-# Used to orchestrate the Gateway, Redis and Node.js backend.
-# Run "docker-compose up -d --build" to spin up the entire distributed system simultaneously. 
-version: '3.8'
+# Orchestrates the API Gateway, single-node Valkey 8, Vector Service, PostgreSQL, OpenTelemetry Collector, and Zipkin.
+# Run: docker compose up -d --build
 
 services:
   # 0. Vendor-Neutral OpenTelemetry Collector (Routes to Zipkin, Grafana Tempo, Jaeger v2, or Datadog)
@@ -26,8 +25,9 @@ services:
     networks:
       - lyria-network
 
-  # 1. The Distributed Rate Limiting Database: Valkey 8 (Linux Foundation BSD drop-in replacement for Redis 8 — matches AWS ElastiCache & GCP Memorystore)
-  redis-cluster:
+  # Single-node Valkey 8 instance for local development.
+  # Production deployments using multi-shard Valkey Cluster remain compatible via {identity} key hash-tags.
+  valkey:
     image: valkey/valkey:8-alpine
     ports:
       - "6379:6379"
@@ -35,29 +35,51 @@ services:
     networks:
       - lyria-network
 
-  # 2. Java 25/26 + Spring Boot 4 API Gateway
+  # 2. Java 26 + Spring Boot 4 API Gateway
+  # api-gateway:
+  #   build: 
+  #     context: ./path-to-java-gateway
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     # Match the exact placeholders in application.yml
+  #     # REDIS_URL=redis://redis-cluster:6379
+  #     - REDIS_HOST=redis-cluster
+  #     - REDIS_PORT=6379
+  #     - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
+  #     - BACKEND_SERVICE_URL=http://node-backend:8000
+  #     # Use 'local' when testing without a live Auth0/Okta URL, or provide JWT_ISSUER_URI for 'prod'
+  #     - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local} # SPRING_PROFILES_ACTIVE=prod
+  #   depends_on:
+  #     - redis-cluster
+  #     - otel-collector
+  #   networks:
+  #     - lyria-network
   api-gateway:
-    build: 
-      context: ./path-to-java-gateway
+    build:
+      context: .
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
     environment:
       # Match the exact placeholders in application.yml
       # REDIS_URL=redis://redis-cluster:6379
-      - REDIS_HOST=redis-cluster
+      - REDIS_HOST=valkey
       - REDIS_PORT=6379
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces
-      - BACKEND_SERVICE_URL=http://node-backend:8000
+      - BACKEND_SERVICE_URL=http://vector-service:8081
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-dev-only-internal-auth-hmac-secret-key-change-in-prod-32bytes!}
+      - INTERNAL_AUTH_ISSUER=api-gateway
       # Use 'local' when testing without a live Auth0/Okta URL, or provide JWT_ISSUER_URI for 'prod'
-      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local} # SPRING_PROFILES_ACTIVE=prod
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-local}
     depends_on:
-      - redis-cluster
+      - valkey
       - otel-collector
     networks:
       - lyria-network
 
-  # #3. Database for Node.js backend.
+  #3. Database for Node.js backend.
   postgres-db:
     image: postgres:15-alpine
     environment:
@@ -70,17 +92,37 @@ services:
       - lyria-network
 
   # 4. Your Node.js AI BFF
-  node-backend:
+  # node-backend:
+  #   build:
+  #     context: ./path-to-node-backend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - REDIS_URL=redis://redis-cluster:6379
+  #     - DATABASE_URL=postgresql://postgres:password@postgres-db:5432/lyria
+  #   depends_on:
+  #     - redis-cluster
+  #     - postgres-db
+  #   networks:
+  #     - lyria-network
+  # 4. Your Vector Service Microservice
+  vector-service:
     build:
-      context: ./path-to-node-backend
+      context: ../Web_Application_Spring
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8081:8081"
     environment:
-      - REDIS_URL=redis://redis-cluster:6379
-      - DATABASE_URL=postgresql://postgres:password@postgres-db:5432/lyria
+      - SERVER_PORT=8081
+      - REDIS_URL=redis://valkey:6379
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-dev-only-internal-auth-hmac-secret-key-change-in-prod-32bytes!}
+      - INTERNAL_AUTH_ISSUER=api-gateway
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-db:5432/lyria
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=password
     depends_on:
-      - redis-cluster
+      - valkey
       - postgres-db
     networks:
       - lyria-network
